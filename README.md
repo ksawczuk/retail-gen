@@ -1,12 +1,47 @@
 # databricks-retail-data
 
-A synthetic, **deliberately dirty** first-party retail dataset for working through a
-Databricks medallion build: ingestion → bronze → cleansing → silver → gold.
+Tutorial datasets are usually too clean. Real first-party data comes from several systems that
+disagree with each other, arrives late or twice, changes shape without warning, and is
+documented by people who were slightly wrong. This repo generates that kind of data, at a
+known level of dirtiness, for working through a Databricks medallion build: ingestion →
+bronze → cleansing → silver → gold.
 
 The company is *Larchwood Supply Co.*, a fictional Canadian retailer with nine source systems:
 CRM, PIM, store ops, e-commerce OMS, POS, promotions, web analytics, inventory and FX. There
 are ~21 months of history (2025-01-01 → 2026-09-30), then 30 daily increments
-(2026-10-01 → 2026-10-30).
+(2026-10-01 → 2026-10-30) that you release one day at a time, so your ingestion sees files
+arrive the way it would in production.
+
+### How it is built
+
+```
+seed ─▶ clean "truth" world ─▶ check_truth() ─▶ 9 source emulators ─▶ landing files
+          (what really              (proves it's        (each adds its own     │
+           happened)                 consistent)         defects, and logs     │
+                                                         every one)            ▼
+                                                    answer key ◀──── validate.py re-counts
+```
+
+- **Clean world first, dirt second.** The generator builds a consistent retailer and checks it,
+  then hands it to emulators of each source system. Each one writes files in its own system's
+  format, time zone and conventions, with its own bugs. So every inconsistency in the output
+  was put there on purpose.
+- **A sealed answer key.** About 100 kinds of defect, each counted, with example keys:
+  duplicate customers under different IDs, CDC deletes of keys that never existed, a column
+  renamed mid-month, refunds larger than the charge, files in the wrong encoding, bot traffic.
+  The clean truth tables are included too, so you can score both your cleansing and your
+  gold numbers.
+- **Checked independently.** `validate.py` re-reads the written files and re-counts defects
+  against the answer key without importing the generator, so a generator bug can't vouch for
+  itself.
+- **Reproducible.** The same seed and scale produce byte-identical files, and `--scale`
+  shrinks the whole world for quick experiments.
+
+> **Spoilers:** `answer_key/` and `retailgen/defects.py` list every defect. Work from the files
+> and `docs/source_system_docs.md` first, and open those only to check yourself.
+
+The output is plain CSV, JSON and Parquet files, so only the loading steps below are specific
+to Databricks. The data works for any platform's tutorial.
 
 | | full scale (default) |
 |---|---|
@@ -21,11 +56,11 @@ are ~21 months of history (2025-01-01 → 2026-09-30), then 30 daily increments
 
 ## Generate
 
-Uses the `analysis` conda env (numpy, pandas, pyarrow):
+Needs Python 3 with numpy, pandas and pyarrow (built with numpy 2.4, pandas 3.0, pyarrow 23):
 
 ```bash
-~/miniforge3/envs/analysis/python.exe generate.py
-~/miniforge3/envs/analysis/python.exe validate.py out
+python generate.py
+python validate.py out
 ```
 
 `--scale 0.1` gives a ~10% copy for quick experiments. `--seed` changes the random world
