@@ -11,16 +11,17 @@ MAX_KEYS = 5000
 class Manifest:
     """Accumulates defect records; the same defect id across many files adds up."""
 
-    def __init__(self):
+    def __init__(self, registry=REGISTRY):
+        self._registry = registry
         self._entries: "OrderedDict[str, dict]" = OrderedDict()
         self.files: dict = {}
 
     def record(self, defect_id, count, keys=None, **detail):
         """Add `count` affected rows (or files) to a catalogued defect, keeping up to MAX_KEYS
         example keys. `detail` fills the description's placeholders (first record wins)."""
-        if defect_id not in REGISTRY:
+        if defect_id not in self._registry:
             raise KeyError(f"defect {defect_id!r} is not declared in retailgen/defects.py")
-        d = REGISTRY[defect_id]
+        d = self._registry[defect_id]
         count = int(count)
         e = self._entries.get(defect_id)
         if e is None:
@@ -39,7 +40,7 @@ class Manifest:
 
     def unrecorded(self) -> list:
         """Catalogued defects no emitter recorded: the catalogue and the code have drifted apart."""
-        return [i for i in REGISTRY if i not in self._entries]
+        return [i for i in self._registry if i not in self._entries]
 
     def note_file(self, rel_path, rows, kind):
         """Remember each written file and its row count, for the validator."""
