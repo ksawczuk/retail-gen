@@ -11,6 +11,7 @@ import gzip
 import io
 import json
 import sys
+import zlib
 from pathlib import Path
 
 import pandas as pd
@@ -28,6 +29,49 @@ def files(root, pattern):
     return sorted(Path(p) for p in glob.glob(str(root / pattern), recursive=True))
 
 
+unreadable = []
+
+
+def read_gz(path):
+    """Return a gzip file's decompressed bytes, or b"" if it is cut short or corrupt.
+    Called by every check that reads a .gz file; records the file for the "opens cleanly" check."""
+    try:
+        return gzip.decompress(path.read_bytes())
+    except (OSError, EOFError, zlib.error):
+        unreadable.append(path.name)
+        return b""
+
+
+def read_text(path):
+    """Return a UTF-8 text file's contents, or "" if it can't be read or decoded.
+    Called by the checks over JSONL and POS CSV files; records the file when it fails."""
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        unreadable.append(path.name)
+        return ""
+
+
+def read_parquet(path, columns=None):
+    """Return a Parquet file as a DataFrame, or an empty one if it is cut short or corrupt.
+    Called by the OMS and inventory checks; records the file when it fails."""
+    try:
+        return pd.read_parquet(path, columns=columns)
+    except Exception:
+        unreadable.append(path.name)
+        return pd.DataFrame(columns=columns)
+
+
+def parquet_rows(path):
+    """Return a Parquet file's row count from its footer, or None if the footer is unreadable.
+    Called by the row-count check; records the file when it fails."""
+    try:
+        return pq.read_metadata(path).num_rows
+    except Exception:
+        unreadable.append(path.name)
+        return None
+
+
 def main(out):
     out = Path(out)
     stage = out / "landing_staging"
@@ -43,7 +87,7 @@ def main(out):
     for p in stage.rglob("*"):
         if not p.is_file() or p.suffix == ".parquet":
             continue
-        data = gzip.decompress(p.read_bytes()) if p.suffix == ".gz" else p.read_bytes()
+        data = read_gz(p) if p.suffix == ".gz" else p.read_bytes()
         if b"\r\n" in data:
             crlf.append(p.name)
         if data.startswith(b"\xef\xbb\xbf"):
@@ -54,7 +98,7 @@ def main(out):
     # web: truncated lines and duplicate event ids
     bad, ids = 0, []
     for p in files(stage, "**/web/events/*.jsonl.gz"):
-        for line in gzip.decompress(p.read_bytes()).decode("utf-8").splitlines():
+        for line in read_gz(p).decode("utf-8", errors="replace").splitlines():
             try:
                 ids.append(json.loads(line)["event_id"])
             except json.JSONDecodeError:
@@ -66,7 +110,7 @@ def main(out):
     # other JSON Lines parse cleanly
     broken = 0
     for p in files(stage, "**/*.jsonl"):
-        for line in p.read_text(encoding="utf-8").splitlines():
+        for line in read_text(p).splitlines():
             try:
                 json.loads(line)
             except json.JSONDecodeError:
@@ -76,7 +120,7 @@ def main(out):
     # POS: malformed rows (column count) in history, and cp1252 only from Quebec stores
     wrong = 0
     for p in files(stage, "history/pos/transactions/*.csv"):
-        rows = list(csv.reader(io.StringIO(p.read_text(encoding="utf-8"))))
+        rows = list(csv.reader(io.StringIO(read_text(p)))) or [[]]
         wrong += sum(1 for r in rows[1:] if len(r) != len(rows[0]))
     check("POS malformed rows = manifest", wrong == cnt("pos.malformed_rows"), f"{wrong} vs {cnt('pos.malformed_rows')}")
     non_utf8 = []
@@ -91,21 +135,21 @@ def main(out):
     check("exactly one empty file", len(empties) == 1, str(empties))
 
     # OMS
-    hist_orders = pd.concat(pd.read_parquet(p) for p in files(stage, "history/oms/orders/*.parquet"))
+    hist_orders = pd.concat(read_parquet(p) for p in files(stage, "history/oms/orders/*.parquet"))
     d = int(hist_orders.duplicated().sum())
     check("OMS exact duplicate history orders = manifest", d == cnt("oms.exact_duplicate_orders"),
           f"{d} vs {cnt('oms.exact_duplicate_orders')}")
-    all_orders = pd.concat(pd.read_parquet(p, columns=["order_id", "order_ts"]) for p in files(stage, "**/oms/orders/*.parquet"))
+    all_orders = pd.concat(read_parquet(p, columns=["order_id", "order_ts"]) for p in files(stage, "**/oms/orders/*.parquet"))
     fut = all_orders.loc[all_orders["order_ts"] > pd.Timestamp("2026-11-01", tz="UTC"), "order_id"].nunique()
     check("OMS future-dated orders = manifest", fut == cnt("oms.future_dated_orders"), f"{fut} vs {cnt('oms.future_dated_orders')}")
-    lines = pd.concat(pd.read_parquet(p, columns=["order_id", "sku"]) for p in files(stage, "**/oms/order_lines/*.parquet"))
+    lines = pd.concat(read_parquet(p, columns=["order_id", "sku"]) for p in files(stage, "**/oms/order_lines/*.parquet"))
     orph = int((~lines["order_id"].isin(set(all_orders["order_id"]))).sum())
     check("OMS orphan order lines = manifest", orph == cnt("oms.orphan_order_lines"), f"{orph} vs {cnt('oms.orphan_order_lines')}")
 
     # POS SKUs missing from PIM
     pim = set()
     for p in files(stage, "**/pim/products/*.jsonl"):
-        pim |= {json.loads(l)["sku"] for l in p.read_text(encoding="utf-8").splitlines()}
+        pim |= {json.loads(l)["sku"] for l in read_text(p).splitlines()}
     pos_skus = set()
     for p in files(stage, "**/pos/transactions/*.csv"):
         if p.stat().st_size == 0:
@@ -128,7 +172,7 @@ def main(out):
     fx = pd.concat([pd.read_csv(p) for p in files(stage, "**/finance/fx_rates/*.csv")])
     inv_n = int((fx["rate"] < 1).sum())
     check("FX inverted rates = manifest", inv_n == cnt("finance.inverted_rate"), f"{inv_n} vs {cnt('finance.inverted_rate')}")
-    inv = pd.concat(pd.read_parquet(p, columns=["on_hand"]) for p in files(stage, "**/inventory/snapshots/*.parquet"))
+    inv = pd.concat(read_parquet(p, columns=["on_hand"]) for p in files(stage, "**/inventory/snapshots/*.parquet"))
     neg = int((inv["on_hand"] < 0).sum())
     check("negative on_hand = manifest", neg == cnt("inventory.negative_on_hand"), f"{neg} vs {cnt('inventory.negative_on_hand')}")
 
@@ -143,8 +187,10 @@ def main(out):
 
     # row counts recorded for Parquet files match the files
     mism = [k for k, v in man["files"].items() if v["kind"] == "parquet" and
-            pq.read_metadata(stage / k).num_rows != v["rows"]]
+            parquet_rows(stage / k) != v["rows"]]
     check("Parquet row counts match manifest", not mism, ", ".join(mism[:3]))
+
+    check("every file opens cleanly", not unreadable, ", ".join(sorted(set(unreadable))[:3]))
 
     print(f"\n{sum(results)}/{len(results)} checks passed")
     return 0 if all(results) else 1
