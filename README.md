@@ -115,3 +115,7 @@ data is kept. The dataset is sized so a full rerun is cheap.
 ## Code
 
 See `docs/walkthrough.md`.
+
+## Licence
+
+MIT. See `LICENSE`.
