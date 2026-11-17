@@ -45,7 +45,7 @@ class DockerFilesTest(unittest.TestCase):
         self.assertIn(":/data/landing_staging:ro", self.compose)
         self.assertNotRegex(self.compose, r"^\s*ports:", )
         for item in ("read_only: true", "cap_drop:", "- ALL", "no-new-privileges:true", "mem_limit:", "cpus:",
-                     'restart: "no"'):
+                     "pids_limit:", "- /tmp:noexec,nosuid,nodev", 'restart: "no"'):
             self.assertIn(item, self.compose)
 
     def test_compose_mounts_nothing_else(self):

@@ -48,6 +48,13 @@ class FilesApiClientTest(unittest.TestCase):
         self.assertEqual(client.size_of("/Volumes/x"), 42)
         self.assertIsNone(client.size_of("/Volumes/y"))
 
+    def test_an_unusable_content_length_is_a_push_error(self):
+        """A missing, empty or non-numeric Content-Length on a 200 is a failed file, not a crash."""
+        for headers in ({}, {"Content-Length": "abc"}, {"Content-Length": ""}, {"Content-Length": "1e3"}):
+            client, _ = client_for([FakeResponse(200, headers)])
+            with self.assertRaises(PushError, msg=str(headers)):
+                client.size_of("/Volumes/x")
+
     def test_ensure_directory_accepts_204(self):
         """The directory call succeeds on 204 and fails on an error status."""
         client, log = client_for([FakeResponse(204), FakeResponse(403)])

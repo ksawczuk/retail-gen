@@ -54,7 +54,11 @@ class FilesApiClient(VolumeClient):
             return None
         if status != 200:
             raise PushError(f"HEAD {remote_path} gave HTTP {status}")
-        return int(headers.get("content-length", -1))
+        # A missing or non-numeric length is a failed check for this file, not a crash
+        try:
+            return int(headers.get("content-length", ""))
+        except ValueError:
+            raise PushError(f"HEAD {remote_path} gave no usable Content-Length") from None
 
     def ensure_directory(self, remote_dir):
         """Create the folder if needed; the call succeeds when it already exists."""

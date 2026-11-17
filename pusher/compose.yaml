@@ -13,8 +13,9 @@ services:
       - no-new-privileges:true
     mem_limit: 256m
     cpus: 0.5
+    pids_limit: 64
     tmpfs:
-      - /tmp
+      - /tmp:noexec,nosuid,nodev
     env_file: .env
     volumes:
       - ${LANDING_STAGING_DIR:?set LANDING_STAGING_DIR}:/data/landing_staging:ro
