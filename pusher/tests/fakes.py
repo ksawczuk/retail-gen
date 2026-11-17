@@ -36,13 +36,16 @@ class FakeVolumeClient(VolumeClient):
 class FakeResponse:
     """A canned HTTP response."""
 
-    def __init__(self, status, headers=None):
-        """Keep the status and headers."""
+    def __init__(self, status, headers=None, read_error=None):
+        """Keep the status and headers, and an error to raise when the body is read."""
         self.status = status
         self._headers = headers or {}
+        self._read_error = read_error
 
     def read(self):
-        """Return an empty body."""
+        """Return an empty body, or raise the configured error."""
+        if self._read_error is not None:
+            raise self._read_error
         return b""
 
     def getheaders(self):
@@ -64,8 +67,11 @@ class FakeConnection:
         self._log.append({"method": method, "url": url, "headers": dict(headers or {}), "body": sent})
 
     def getresponse(self):
-        """Return the next scripted response."""
-        return self._script.pop(0)
+        """Return the next scripted response, or raise it if it is an exception."""
+        item = self._script.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
 
     def close(self):
         """Nothing to close."""

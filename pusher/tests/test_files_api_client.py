@@ -1,5 +1,6 @@
 """Unit tests for pusher.volume_client.FilesApiClient against a fake HTTP connection."""
 
+import http.client
 import tempfile
 import unittest
 from pathlib import Path
@@ -75,6 +76,19 @@ class FilesApiClientTest(unittest.TestCase):
         client, _ = client_for([FakeResponse(302, {"Location": "https://evil.example"})])
         with self.assertRaises(PushError):
             client.upload(self.file, "/Volumes/x")
+
+    def test_protocol_errors_become_push_errors(self):
+        """A bad status line or a short body is a failed file, not a crash, and names only the error class."""
+        for error_response in (
+            http.client.BadStatusLine("garbage"),
+            FakeResponse(200, read_error=http.client.IncompleteRead(b"x")),
+            ConnectionResetError("reset"),
+        ):
+            client, _ = client_for([error_response])
+            with self.assertRaises(PushError) as caught:
+                client.upload(self.file, "/Volumes/x")
+            self.assertNotIn("garbage", str(caught.exception))
+            self.assertIn("PUT failed:", str(caught.exception))
 
     def test_the_token_is_not_in_errors_or_repr(self):
         """Neither an error message nor the client's printed form contains the token."""

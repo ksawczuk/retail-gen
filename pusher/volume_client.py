@@ -99,7 +99,7 @@ class FilesApiClient(VolumeClient):
             response = connection.getresponse()
             response.read()
             return response.status, {name.lower(): value for name, value in response.getheaders()}
-        except OSError as exc:
+        except (OSError, http.client.HTTPException) as exc:
             raise PushError(f"{method} failed: {type(exc).__name__}") from None
         finally:
             connection.close()
