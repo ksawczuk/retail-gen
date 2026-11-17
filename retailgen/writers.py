@@ -94,8 +94,15 @@ class Output:
         return rel
 
     def parquet(self, df, day, source, entity, filename):
+        """Write one Parquet file with timestamps in microseconds (sub-microsecond parts are floored).
+        Called by the OMS and inventory emitters for each history and increment file."""
         rel = self.rel(day, source, entity, filename)
-        df.to_parquet(self._path(rel), index=False, engine="pyarrow")
+        # Floor every timestamp column to microseconds, then write with the strict microsecond unit (GEN-01)
+        df = df.copy()
+        for column in df.columns:
+            if pd.api.types.is_datetime64_any_dtype(df[column]):
+                df[column] = df[column].dt.floor("us")
+        df.to_parquet(self._path(rel), index=False, engine="pyarrow", coerce_timestamps="us")
         self.manifest.note_file(rel, len(df), "parquet")
         return rel
 
