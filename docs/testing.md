@@ -14,6 +14,7 @@ all of it spent generating small datasets.
 | `tests/test_manifest_guards.py` | The three guards that keep the defect catalogue and the code in step: planting an undeclared defect raises `KeyError`; filling a description with the wrong placeholder names raises `ValueError`; a declared defect that nothing planted shows up in `unrecorded()`, which is what makes `generate.py` exit non-zero. It also checks that repeated records add up. |
 | `tests/test_determinism.py` | Two runs with the same seed and scale write byte-identical files. This is the safety net for refactoring the generator: change the code, rerun, and a difference means the data changed. |
 | `tests/test_parquet_timestamps.py` | Every Parquet file the generator writes (at scale 0.01) stores its timestamps in microseconds (GEN-01 in `docs/edge_cases.md`). |
+| `tests/test_floor_timestamps.py` | `floor_timestamps` drops sub-microsecond parts and changes nothing else; at scale 0.01, flooring makes no two rows with the same key and timestamp column equal that were different before (GEN-01). |
 | `tests/test_validate_truncated.py` | `validate.py` prints a FAIL line, and does not crash, when a gzip or Parquet file is cut short. It arrives with the #437 fix branch (`fix/validate-truncated-file`), so it is present only once that branch is merged. |
 
 ## How the guard tests stay away from the answer key
