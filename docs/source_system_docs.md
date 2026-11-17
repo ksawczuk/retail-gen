@@ -10,7 +10,8 @@ NS and a few in Washington and Oregon, plus a website and a mobile app.
 **Cut-over:** the history load is a backfill up to and including **2026-09-30**. From
 **2026-10-01** each system drops files daily.
 
-**Landing layout** (after the drip notebook delivers them): `landing/<source>/<entity>/<file>`.
+**Landing layout** (after the pusher delivers them): `landing/<source>/<entity>/<file>`, one folder per entity. History
+and increments of an entity share the folder.
 
 ---
 

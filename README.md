@@ -112,6 +112,12 @@ data is kept. The dataset is sized so a full rerun is cheap.
   360/RFM, product and category performance, returns and refunds, web funnel conversion,
   inventory cover.
 
+## Feeding a Databricks volume from a server
+
+`pusher/` uploads `landing_staging/` to a Databricks volume, one delivery at a time (`history`, or `day YYYY-MM-DD`). It
+runs in Docker, uses only the standard library and depends only on the landing layout. See `pusher/README.md` for the
+run interface (command, environment, exit codes, log).
+
 ## Code
 
 See `docs/walkthrough.md`.
