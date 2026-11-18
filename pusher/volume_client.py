@@ -4,10 +4,14 @@ Used by the pusher for every remote call; tests replace it with a fake. The toke
 """
 
 import http.client
+import re
 import time
 from abc import ABC, abstractmethod
 from urllib.parse import quote
 
+from pusher.connectors import DirectConnector
+
+TUNNEL_REFUSED = re.compile(r"Tunnel connection failed: (\d{3})")
 RETRY_STATUSES = (429, 500, 502, 503, 504)
 RETRY_WAITS = (1, 4)
 
@@ -35,11 +39,11 @@ class VolumeClient(ABC):
 class FilesApiClient(VolumeClient):
     """Talks to the Databricks Files API over HTTPS with a bearer token; follows no redirects."""
 
-    def __init__(self, host, token, connection_factory=http.client.HTTPSConnection, sleep=time.sleep, timeout=300):
-        """Keep the host and token; the connection factory and sleep are injected so tests need no network."""
+    def __init__(self, host, token, connector=None, sleep=time.sleep, timeout=300):
+        """Keep the host and token; the connector (direct when not given) and sleep are injected so tests need no network."""
         self._host = host
         self._token = token
-        self._connect = connection_factory
+        self._connector = connector or DirectConnector()
         self._sleep = sleep
         self._timeout = timeout
 
@@ -92,7 +96,7 @@ class FilesApiClient(VolumeClient):
     def _once(self, method, url, local_path):
         """Make one HTTPS request on a new connection and return (status, headers)."""
         headers = {"Authorization": f"Bearer {self._token}"}
-        connection = self._connect(self._host, timeout=self._timeout)
+        connection = self._connector.open(self._host, self._timeout)
         try:
             if local_path is None:
                 connection.request(method, url, headers=headers)
@@ -104,6 +108,10 @@ class FilesApiClient(VolumeClient):
             response.read()
             return response.status, {name.lower(): value for name, value in response.getheaders()}
         except (OSError, http.client.HTTPException) as exc:
+            # A refused tunnel names only the proxy's status number; anything else names only the error class
+            refused = TUNNEL_REFUSED.match(str(exc))
+            if refused:
+                raise PushError(f"{method} proxy refused the tunnel: HTTP {refused.group(1)}") from None
             raise PushError(f"{method} failed: {type(exc).__name__}") from None
         finally:
             connection.close()

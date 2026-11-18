@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from pusher.cli import main
+from pusher.connectors import DirectConnector, TunnelConnector
 from pusher.tests.fakes import FakeVolumeClient, make_landing
 
 TOKEN = "fake-token-value"
@@ -32,7 +33,7 @@ class CliTest(unittest.TestCase):
     def _run(self, argv, env=None, client=None):
         """Run the CLI with a fake client factory."""
         fake = client or FakeVolumeClient()
-        code = main(argv, env or self.env, self.out, client_factory=lambda host, token: fake)
+        code = main(argv, env or self.env, self.out, client_factory=lambda host, token, connector: fake)
         return code, fake
 
     def test_history_exits_zero_and_logs(self):
@@ -73,7 +74,7 @@ class CliTest(unittest.TestCase):
         """With PUSH_DRY_RUN=1 and no host or token the run lists files and never builds a client."""
         env = {"PUSH_DRY_RUN": "1", "PUSH_LANDING_ROOT": str(self.root)}
 
-        def refuse(host, token):
+        def refuse(host, token, connector):
             """Fail if a client is built."""
             raise AssertionError("a dry run must not build a client")
 
@@ -85,8 +86,50 @@ class CliTest(unittest.TestCase):
         """A dry run with a bad date or a missing landing folder is still exit code 2."""
         for argv, root in ((["day", "bad"], self.root), (["history"], Path(self._tmp.name) / "missing")):
             code = main(argv, {"PUSH_DRY_RUN": "1", "PUSH_LANDING_ROOT": str(root)}, io.StringIO(),
-                        client_factory=lambda host, token: None)
+                        client_factory=lambda host, token, connector: None)
             self.assertEqual(code, 2, argv)
+
+    def _connector_used(self, env):
+        """Run the CLI and return the connector it handed to the client factory."""
+        seen = []
+
+        def factory(host, token, connector):
+            """Remember the connector and return a fake client."""
+            seen.append(connector)
+            return FakeVolumeClient()
+
+        main(["history"], env, self.out, client_factory=factory)
+        return seen[0]
+
+    def test_no_proxy_setting_connects_directly(self):
+        """With HTTPS_PROXY unset the client gets the direct connector."""
+        self.assertIsInstance(self._connector_used(self.env), DirectConnector)
+
+    def test_a_proxy_setting_tunnels(self):
+        """With HTTPS_PROXY set the client gets the tunnel connector."""
+        env = {**self.env, "HTTPS_PROXY": "http://pusher-proxy:3128"}
+        self.assertIsInstance(self._connector_used(env), TunnelConnector)
+
+    def test_a_bad_proxy_setting_exits_two_and_sends_nothing(self):
+        """A bad HTTPS_PROXY is exit code 2 with one ERROR line and no client built."""
+        for value in ("https://pusher-proxy:3128", "http://user:secret@pusher-proxy:3128", "pusher-proxy"):
+            self.out = io.StringIO()
+            code, fake = self._run(["history"], {**self.env, "HTTPS_PROXY": value})
+            self.assertEqual(code, 2, value)
+            self.assertEqual(fake.calls, [])
+            self.assertTrue(self.out.getvalue().startswith("ERROR HTTPS_PROXY"))
+            self.assertNotIn("secret", self.out.getvalue())
+
+    def test_a_refused_tunnel_is_a_failed_file_with_the_proxy_status(self):
+        """A file whose tunnel was refused is logged failed with the status, and the run exits 1."""
+        env = {**self.env, "HTTPS_PROXY": "http://pusher-proxy:3128"}
+        client = FakeVolumeClient(fail_on=("a.csv",), fail_message="PUT proxy refused the tunnel: HTTP 403")
+        code, _ = self._run(["history"], env, client=client)
+        self.assertEqual(code, 1)
+        self.assertIn("status=failed", self.out.getvalue())
+        self.assertIn("error=PUT_proxy_refused_the_tunnel:_HTTP_403", self.out.getvalue())
+        self.assertNotIn("pusher-proxy", self.out.getvalue())
+        self.assertNotIn(TOKEN, self.out.getvalue())
 
     def test_the_token_never_appears_in_the_output(self):
         """No run prints the token."""

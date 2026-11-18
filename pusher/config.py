@@ -13,6 +13,14 @@ DEFAULT_LANDING_ROOT = "/data/landing_staging"
 
 
 @dataclass(frozen=True)
+class ProxyAddress:
+    """Where the egress proxy listens: a host name and a port."""
+
+    host: str
+    port: int
+
+
+@dataclass(frozen=True)
 class PushConfig:
     """The validated settings for one run; the token never appears in repr."""
 
@@ -20,6 +28,7 @@ class PushConfig:
     token: str = field(default=None, repr=False)
     dry_run: bool = False
     landing_root: Path = Path(DEFAULT_LANDING_ROOT)
+    proxy: ProxyAddress = None
 
     @classmethod
     def from_env(cls, env):
@@ -39,7 +48,26 @@ class PushConfig:
         if token is not None and any(ch.isspace() for ch in token):
             raise InputError("DATABRICKS_TOKEN must not contain whitespace")
         landing_root = Path(env.get("PUSH_LANDING_ROOT") or DEFAULT_LANDING_ROOT)
-        return cls(host=host, token=token, dry_run=dry_run, landing_root=landing_root)
+        # An unset or empty HTTPS_PROXY means a direct connection; anything given must be valid, even in a dry run
+        proxy_value = (env.get("HTTPS_PROXY") or "").strip()
+        proxy = _clean_proxy(proxy_value) if proxy_value else None
+        return cls(host=host, token=token, dry_run=dry_run, landing_root=landing_root, proxy=proxy)
+
+
+def _clean_proxy(value):
+    """Return the proxy address from a plain http://host:port, refusing other schemes, credentials, paths and queries."""
+    parts = urlsplit(value)
+    # Read the port; a non-numeric or out-of-range port is refused
+    try:
+        port = parts.port
+    except ValueError:
+        port = None
+    # Only a bare http host with an explicit port is accepted
+    if parts.scheme != "http" or not parts.hostname or port is None or port == 0:
+        raise InputError("HTTPS_PROXY must be http://host:port")
+    if parts.username or parts.password or parts.path not in ("", "/") or parts.query or parts.fragment:
+        raise InputError("HTTPS_PROXY must be http://host:port, with no credentials or path")
+    return ProxyAddress(host=parts.hostname, port=port)
 
 
 def _clean_host(value):
