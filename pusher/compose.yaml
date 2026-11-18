@@ -1,0 +1,21 @@
+# Example one-shot run, for IT to adapt on datapig. Run from this folder with:
+#   LANDING_STAGING_DIR=/path/to/landing_staging docker compose run --rm retail-gen-pusher history
+#   LANDING_STAGING_DIR=/path/to/landing_staging docker compose run --rm retail-gen-pusher day 2026-10-01
+services:
+  retail-gen-pusher:
+    image: retail-gen-pusher
+    build: .
+    restart: "no"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 64
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev
+    env_file: .env
+    volumes:
+      - ${LANDING_STAGING_DIR:?set LANDING_STAGING_DIR}:/data/landing_staging:ro
