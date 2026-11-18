@@ -17,5 +17,7 @@ services:
     tmpfs:
       - /tmp:noexec,nosuid,nodev
     env_file: .env
+    # environment:
+    #   HTTPS_PROXY: http://pusher-proxy:3128
     volumes:
       - ${LANDING_STAGING_DIR:?set LANDING_STAGING_DIR}:/data/landing_staging:ro

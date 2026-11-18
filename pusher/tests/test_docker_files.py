@@ -24,6 +24,16 @@ class DockerFilesTest(unittest.TestCase):
         self.assertNotIn("latest", tag)
         self.assertRegex(tag, r"^\d+\.\d+\.\d+-slim")
 
+    def test_base_image_is_pinned_to_a_digest(self):
+        """The FROM line ends with @sha256: and 64 hex characters."""
+        self.assertRegex(self.dockerfile, r"(?m)^FROM python:\d+\.\d+\.\d+-slim\S*@sha256:[0-9a-f]{64}$")
+
+    def test_the_proxy_is_documented_but_not_set_in_the_env_example(self):
+        """The compose example shows HTTPS_PROXY as a comment; .env.example never sets it."""
+        self.assertIn("#   HTTPS_PROXY: http://pusher-proxy:3128", self.compose)
+        env_example = (PUSHER_DIR / ".env.example").read_text(encoding="utf-8")
+        self.assertNotRegex(env_example, r"(?m)^HTTPS_PROXY=")
+
     def test_runs_as_a_non_root_user(self):
         """A USER line switches to a non-root user."""
         users = re.findall(r"^USER (\S+)", self.dockerfile, re.M)
