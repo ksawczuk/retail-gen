@@ -5,17 +5,21 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from pusher.config import ProxyAddress
+from pusher.connectors import DirectConnector, TunnelConnector
 from pusher.tests.fakes import FakeResponse, make_factory
 from pusher.volume_client import FilesApiClient, PushError
 
 TOKEN = "fake-token-value"
+PROXY = ProxyAddress("pusher-proxy", 3128)
 
 
-def client_for(responses, sleeps=None):
-    """Build a client over scripted responses; returns (client, request log)."""
+def client_for(responses, sleeps=None, proxy=None):
+    """Build a client over scripted responses, direct or through a proxy; returns (client, request log)."""
     factory, log = make_factory(responses)
+    connector = TunnelConnector(proxy, factory) if proxy else DirectConnector(factory)
     client = FilesApiClient(
-        "example.cloud.databricks.com", TOKEN, connection_factory=factory,
+        "example.cloud.databricks.com", TOKEN, connector=connector,
         sleep=(sleeps.append if sleeps is not None else (lambda seconds: None)),
     )
     return client, log
@@ -96,6 +100,50 @@ class FilesApiClientTest(unittest.TestCase):
                 client.upload(self.file, "/Volumes/x")
             self.assertNotIn("garbage", str(caught.exception))
             self.assertIn("PUT failed:", str(caught.exception))
+
+    def test_a_refused_tunnel_names_only_the_proxy_status_and_is_tried_once(self):
+        """A 403 on the CONNECT is one failed call that carries the status number, not the proxy's text."""
+        sleeps = []
+        client, log = client_for(
+            [OSError("Tunnel connection failed: 403 Forbidden")] * 3, sleeps, proxy=PROXY)
+        with self.assertRaises(PushError) as caught:
+            client.upload(self.file, "/Volumes/x")
+        self.assertEqual(str(caught.exception), "PUT proxy refused the tunnel: HTTP 403")
+        self.assertNotIn("Forbidden", str(caught.exception))
+        self.assertEqual(sleeps, [])
+
+    def test_a_reset_is_tried_once_and_carries_no_status(self):
+        """A connection reset fails at once, with only the error class, as before."""
+        sleeps = []
+        client, _ = client_for([ConnectionResetError("reset")] * 3, sleeps, proxy=PROXY)
+        with self.assertRaises(PushError) as caught:
+            client.upload(self.file, "/Volumes/x")
+        self.assertEqual(str(caught.exception), "PUT failed: ConnectionResetError")
+        self.assertEqual(sleeps, [])
+
+    def test_a_503_is_still_retried_through_the_tunnel(self):
+        """Throttling and server errors are retried the same way when a proxy is used."""
+        sleeps = []
+        client, log = client_for([FakeResponse(503), FakeResponse(204)], sleeps, proxy=PROXY)
+        self.assertEqual(client.upload(self.file, "/Volumes/x"), 204)
+        self.assertEqual(len(log), 2)
+        self.assertEqual(sleeps, [1])
+
+    def test_a_redirect_through_the_tunnel_is_still_a_failure(self):
+        """The token cannot be sent elsewhere, with or without a proxy."""
+        client, _ = client_for([FakeResponse(302, {"Location": "https://evil.example"})], proxy=PROXY)
+        with self.assertRaises(PushError):
+            client.upload(self.file, "/Volumes/x")
+
+    def test_the_token_is_only_in_the_request_header_through_the_tunnel(self):
+        """The bearer header is on the request (inside the tunnel); no error or repr carries the token."""
+        client, log = client_for([FakeResponse(204), OSError("Tunnel connection failed: 403 Forbidden")], proxy=PROXY)
+        client.upload(self.file, "/Volumes/x")
+        self.assertEqual(log[0]["headers"]["Authorization"], f"Bearer {TOKEN}")
+        with self.assertRaises(PushError) as caught:
+            client.upload(self.file, "/Volumes/x")
+        self.assertNotIn(TOKEN, str(caught.exception))
+        self.assertNotIn(TOKEN, repr(client))
 
     def test_the_token_is_not_in_errors_or_repr(self):
         """Neither an error message nor the client's printed form contains the token."""

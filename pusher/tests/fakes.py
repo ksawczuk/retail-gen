@@ -56,10 +56,15 @@ class FakeResponse:
 class FakeConnection:
     """Records one request and returns the next scripted response."""
 
-    def __init__(self, script, log):
-        """Keep the shared response script and the shared request log."""
+    def __init__(self, script, log, record=None):
+        """Keep the shared response script, the shared request log and this connection's open record."""
         self._script = script
         self._log = log
+        self._record = record if record is not None else {}
+
+    def set_tunnel(self, host, port=None, headers=None):
+        """Record the host and port the connection was told to tunnel to."""
+        self._record["tunnel"] = (host, port)
 
     def request(self, method, url, body=None, headers=None):
         """Record the request; read the body if it is a file object."""
@@ -78,14 +83,20 @@ class FakeConnection:
 
 
 def make_factory(responses):
-    """Return (factory, log): a connection factory that serves the responses in order, and the request log."""
+    """Return (factory, log): a connection factory that serves the responses in order, and the request log.
+
+    The factory's `opened` list holds one record per connection: host, port, timeout and the tunnel target (or None).
+    """
     script = list(responses)
     log = []
 
-    def factory(host, timeout=None):
-        """Build a fake connection."""
-        return FakeConnection(script, log)
+    def factory(host, port=None, timeout=None):
+        """Build a fake connection and note how it was opened."""
+        record = {"host": host, "port": port, "timeout": timeout, "tunnel": None}
+        factory.opened.append(record)
+        return FakeConnection(script, log, record)
 
+    factory.opened = []
     return factory, log
 
 
