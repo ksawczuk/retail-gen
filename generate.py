@@ -21,7 +21,7 @@ from retailgen.config import Config
 from retailgen.manifest import Manifest
 from retailgen.sources import EMITTERS
 from retailgen.truth import build_truth
-from retailgen.writers import Output
+from retailgen.writers import Output, floor_timestamps
 
 
 def write_truth(t, folder: Path):
@@ -34,7 +34,8 @@ def write_truth(t, folder: Path):
         for c in df.columns:
             if df[c].dtype == object:
                 df[c] = df[c].map(lambda v: None if v is None else str(v))
-        df.to_parquet(folder / f"{name}.parquet", index=False)
+        # Microsecond timestamps, the same as the landing files (GEN-01)
+        floor_timestamps(df).to_parquet(folder / f"{name}.parquet", index=False, coerce_timestamps="us")
     events = [{k: (str(v) if k == "day" or k == "closed_at" else v) for k, v in e.items()} for e in t.store_events]
     with open(folder / "store_events.json", "w", encoding="utf-8", newline="\n") as f:
         json.dump({"store_events": events, "deleted_customers": sorted(t.deleted_customers)}, f, indent=1)

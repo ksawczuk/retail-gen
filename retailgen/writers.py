@@ -33,6 +33,17 @@ def to_jsonable(v):
     return v
 
 
+def floor_timestamps(df):
+    """Return a copy of df with every timestamp column floored to microseconds.
+    Called by Output.parquet for landing files and by generate.write_truth for the truth tables (GEN-01)."""
+    df = df.copy()
+    # Floor each datetime column, leaving other columns alone
+    for column in df.columns:
+        if pd.api.types.is_datetime64_any_dtype(df[column]):
+            df[column] = df[column].dt.floor("us")
+    return df
+
+
 class Output:
     """Writes history and increment files under one root and logs each to the manifest."""
 
@@ -94,8 +105,11 @@ class Output:
         return rel
 
     def parquet(self, df, day, source, entity, filename):
+        """Write one Parquet file with timestamps in microseconds (sub-microsecond parts are floored).
+        Called by the OMS and inventory emitters for each history and increment file."""
         rel = self.rel(day, source, entity, filename)
-        df.to_parquet(self._path(rel), index=False, engine="pyarrow")
+        # Floor timestamps to microseconds, then write with the strict microsecond unit (GEN-01)
+        floor_timestamps(df).to_parquet(self._path(rel), index=False, engine="pyarrow", coerce_timestamps="us")
         self.manifest.note_file(rel, len(df), "parquet")
         return rel
 
