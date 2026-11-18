@@ -55,6 +55,45 @@ class ConfigTest(unittest.TestCase):
         with self.assertRaises(InputError):
             PushConfig.from_env({**GOOD, "DATABRICKS_TOKEN": "abc def"})
 
+    def test_proxy_is_none_when_unset_or_empty(self):
+        """No HTTPS_PROXY, or an empty one, means a direct connection."""
+        self.assertIsNone(PushConfig.from_env(GOOD).proxy)
+        self.assertIsNone(PushConfig.from_env({**GOOD, "HTTPS_PROXY": ""}).proxy)
+        self.assertIsNone(PushConfig.from_env({**GOOD, "HTTPS_PROXY": "  "}).proxy)
+
+    def test_a_plain_http_proxy_is_read(self):
+        """http://host:port gives the host and the port; a trailing slash is allowed."""
+        for value in ("http://pusher-proxy:3128", "http://pusher-proxy:3128/"):
+            proxy = PushConfig.from_env({**GOOD, "HTTPS_PROXY": value}).proxy
+            self.assertEqual((proxy.host, proxy.port), ("pusher-proxy", 3128), value)
+
+    def test_bad_proxy_values_are_refused(self):
+        """Other schemes, a missing or bad port, credentials, paths, queries and bare names are refused."""
+        for value in (
+            "https://pusher-proxy:3128", "pusher-proxy:3128", "pusher-proxy", "http://pusher-proxy",
+            "http://pusher-proxy:0", "http://pusher-proxy:70000", "http://pusher-proxy:abc",
+            "http://user:pw@pusher-proxy:3128", "http://user@pusher-proxy:3128",
+            "http://pusher-proxy:3128/path", "http://pusher-proxy:3128?x=1", "http://:3128",
+        ):
+            with self.assertRaises(InputError, msg=value):
+                PushConfig.from_env({**GOOD, "HTTPS_PROXY": value})
+
+    def test_a_bad_proxy_is_refused_in_a_dry_run_too(self):
+        """A dry run still checks a given HTTPS_PROXY."""
+        with self.assertRaises(InputError):
+            PushConfig.from_env({"PUSH_DRY_RUN": "1", "HTTPS_PROXY": "https://pusher-proxy:3128"})
+
+    def test_only_the_upper_case_name_is_read(self):
+        """https_proxy and NO_PROXY are ignored."""
+        env = {**GOOD, "https_proxy": "http://pusher-proxy:3128", "NO_PROXY": "example.com"}
+        self.assertIsNone(PushConfig.from_env(env).proxy)
+
+    def test_the_proxy_error_does_not_echo_the_value(self):
+        """The message names the variable but never prints what was given."""
+        with self.assertRaises(InputError) as caught:
+            PushConfig.from_env({**GOOD, "HTTPS_PROXY": "http://user:secret@pusher-proxy:3128"})
+        self.assertNotIn("secret", str(caught.exception))
+
     def test_repr_hides_the_token(self):
         """The token never appears in the printed form of the settings."""
         self.assertNotIn("fake-token-value", repr(PushConfig.from_env(GOOD)))
