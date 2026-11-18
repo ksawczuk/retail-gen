@@ -4,6 +4,7 @@ Called by `python -m pusher`; this is where the concrete classes are chosen.
 """
 
 from pusher.config import PushConfig
+from pusher.connectors import DirectConnector, TunnelConnector
 from pusher.errors import InputError
 from pusher.mode import Mode
 from pusher.planner import FilePlanner
@@ -23,8 +24,10 @@ def main(argv, env, out, client_factory=FilesApiClient):
     except InputError as exc:
         log.error(str(exc))
         return 2
+    # Tunnel through the proxy when HTTPS_PROXY is set, otherwise connect directly
+    connector = TunnelConnector(config.proxy) if config.proxy else DirectConnector()
     # A dry run has no client, so it makes no network call
-    client = None if config.dry_run else client_factory(config.host, config.token)
+    client = None if config.dry_run else client_factory(config.host, config.token, connector)
     # Send the files and report
     result = Pusher(client, log, dry_run=config.dry_run).run(items, mode.delivery_label())
     log.summary(result)

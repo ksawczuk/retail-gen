@@ -9,10 +9,11 @@ from pusher.volume_client import PushError, VolumeClient
 class FakeVolumeClient(VolumeClient):
     """Keeps uploaded files in memory and records every call; can be told to fail on chosen paths."""
 
-    def __init__(self, existing=None, fail_on=()):
-        """Start with remote files (path -> size) and a list of path fragments that make uploads fail."""
+    def __init__(self, existing=None, fail_on=(), fail_message="PUT gave HTTP 500"):
+        """Start with remote files (path -> size), path fragments that make uploads fail, and the failure message."""
         self.files = dict(existing or {})
         self.fail_on = tuple(fail_on)
+        self.fail_message = fail_message
         self.calls = []
 
     def size_of(self, remote_path):
@@ -28,7 +29,7 @@ class FakeVolumeClient(VolumeClient):
         """Store the file size, or fail for a matching path."""
         self.calls.append(("upload", remote_path))
         if any(fragment in remote_path for fragment in self.fail_on):
-            raise PushError("PUT gave HTTP 500")
+            raise PushError(self.fail_message)
         self.files[remote_path] = Path(local_path).stat().st_size
         return 204
 
