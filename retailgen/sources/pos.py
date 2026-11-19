@@ -113,7 +113,7 @@ def emit(cfg, rng, t, out, man):
     man.record("pos.malformed_rows", n_bad)
 
     empty_store = ca[(2 * len(ca)) // 3] if len(ca) > 2 else ca[0]
-    d3, d14, d15 = cfg.increment_day(3), cfg.increment_day(14), cfg.increment_day(15)
+    d3, d14 = cfg.increment_day(3), cfg.increment_day(14)
     held = None
     guarded_done, first_written = False, None
     for day, g in days.items():
@@ -121,9 +121,10 @@ def emit(cfg, rng, t, out, man):
             gs = gs.drop(columns=["_sid"])
             fname = f"pos_{gs['STORE_CODE'].iloc[0]}_{day:%Y%m%d}.csv"
             enc = "cp1252" if s in qc else "utf-8"
-            if day == d14 and s == empty_store:
+            # Run the second guarded step on the first day from d14 on that this store has a file (GEN-02)
+            if held is None and day >= d14 and s == empty_store:
                 out.empty(day, SRC, "transactions", fname)
-                held = (gs, fname)
+                held = (gs, fname, day)
                 continue
             rel = out.csv(gs, day, SRC, "transactions", fname, encoding=enc)
             first_written = first_written or (rel, gs, fname)
@@ -138,7 +139,8 @@ def emit(cfg, rng, t, out, man):
         out.duplicate(rel, fname.replace(".csv", "_dup.csv"))
         man.record("pos.duplicate_file", len(gs), keys=[fname], fname=fname)
     if held is not None:
-        gs, fname = held
-        out.csv(gs, d15, SRC, "transactions", fname.replace(".csv", "_resend.csv"))
+        gs, fname, held_day = held
+        resend_day = min(held_day + pd.Timedelta(days=1), cfg.increment_end)
+        out.csv(gs, resend_day, SRC, "transactions", fname.replace(".csv", "_resend.csv"))
         man.record("pos.empty_file_then_resend", len(gs), keys=[fname], fname=fname)
     man.record("pos.quebec_files_cp1252", 1)
