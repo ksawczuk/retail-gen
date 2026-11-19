@@ -67,8 +67,10 @@ def main():
         emit(cfg, rng, truth, out, man)
     man.write(root / "answer_key")
     missing = man.unrecorded()
+    # Stop without run.json when a declared defect was never recorded; the ids go to the sealed folder, not the screen
     if missing:
-        raise SystemExit(f"declared in retailgen/defects.py but never recorded: {', '.join(missing)}")
+        man.write_unrecorded(root / "answer_key")
+        raise SystemExit(man.incomplete_message(cfg.scale, cfg.seed))
     if not args.no_truth:
         log("answer key: truth tables")
         write_truth(truth, root / "answer_key" / "truth")

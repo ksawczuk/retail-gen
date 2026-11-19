@@ -75,6 +75,10 @@ def parquet_rows(path):
 def main(out):
     out = Path(out)
     stage = out / "landing_staging"
+    # Refuse output from a run that did not finish: generate.py writes run.json last
+    if not (out / "answer_key" / "run.json").exists():
+        print("answer_key/run.json is missing: the run did not finish, so regenerate the output before validating.")
+        return 2
     man = json.loads((out / "answer_key" / "defects_manifest.json").read_text(encoding="utf-8"))
     D = {d["defect_id"]: d for d in man["defects"]}
     cnt = lambda k: D[k]["count"] if k in D else 0
