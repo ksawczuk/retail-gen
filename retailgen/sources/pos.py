@@ -115,6 +115,7 @@ def emit(cfg, rng, t, out, man):
     empty_store = ca[(2 * len(ca)) // 3] if len(ca) > 2 else ca[0]
     d3, d14, d15 = cfg.increment_day(3), cfg.increment_day(14), cfg.increment_day(15)
     held = None
+    guarded_done, first_written = False, None
     for day, g in days.items():
         for s, gs in g.groupby("_sid"):
             gs = gs.drop(columns=["_sid"])
@@ -125,9 +126,17 @@ def emit(cfg, rng, t, out, man):
                 held = (gs, fname)
                 continue
             rel = out.csv(gs, day, SRC, "transactions", fname, encoding=enc)
-            if day == d3 and s == ca[0]:
+            first_written = first_written or (rel, gs, fname)
+            # Run the guarded step on the first day from d3 on that this store has a file (GEN-02)
+            if not guarded_done and day >= d3 and s == ca[0]:
                 out.duplicate(rel, fname.replace(".csv", "_dup.csv"))
                 man.record("pos.duplicate_file", len(gs), keys=[fname], fname=fname)
+                guarded_done = True
+    # If the store never had a file, run the guarded step on the first file written (GEN-02)
+    if not guarded_done and first_written is not None:
+        rel, gs, fname = first_written
+        out.duplicate(rel, fname.replace(".csv", "_dup.csv"))
+        man.record("pos.duplicate_file", len(gs), keys=[fname], fname=fname)
     if held is not None:
         gs, fname = held
         out.csv(gs, d15, SRC, "transactions", fname.replace(".csv", "_resend.csv"))
