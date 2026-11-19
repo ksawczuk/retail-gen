@@ -43,5 +43,16 @@ class ValidateTruncatedFileTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
 
 
+class ValidateUnfinishedRunTest(unittest.TestCase):
+    def test_output_without_run_json_is_refused(self):
+        """validate.py refuses output from a run that did not finish (no run.json), without reading anything else."""
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "answer_key").mkdir()
+            result = run("validate.py", tmp)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("run did not finish", result.stdout)
+            self.assertNotIn("Traceback", result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
