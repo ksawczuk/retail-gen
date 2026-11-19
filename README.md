@@ -66,6 +66,11 @@ python validate.py out
 `--scale 0.1` gives a ~10% copy for quick experiments. `--seed` changes the random world
 (the same seed always gives the same files). `--no-truth` skips writing the truth tables.
 
+A run can stop with a message naming the scale and seed when the output would not match the catalogue, which can
+happen at small scales for some seeds. That output is incomplete (it has no `answer_key/run.json`, and `validate.py`
+refuses it): regenerate it with a larger scale or another seed. The ids that were missed are listed in
+`answer_key/unrecorded_defects.txt`, which belongs to the sealed answer key.
+
 Output:
 
 ```

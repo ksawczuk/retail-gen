@@ -1,6 +1,8 @@
 """Tests for the three guards that keep the defect catalogue and the code that plants defects in step.
 They use a two-entry fake catalogue, so they never touch the real one. Run with: python -m unittest"""
+import tempfile
 import unittest
+from pathlib import Path
 
 from retailgen.defects import Defect
 from retailgen.manifest import Manifest
@@ -41,6 +43,23 @@ class ManifestGuardsTest(unittest.TestCase):
         self.manifest.record("src.plain", 2)
         self.manifest.record("src.plain", 3)
         self.assertEqual(self.manifest.count("src.plain"), 5)
+
+    def test_incomplete_message_names_scale_seed_and_counts_but_no_ids(self):
+        """The screen message for a run with unrecorded defects carries scale, seed and counts, never a defect id."""
+        self.manifest.record("src.plain", 2)
+        message = self.manifest.incomplete_message(0.01, 7)
+        self.assertIn("scale 0.01, seed 7", message)
+        self.assertIn("1 of 2 declared", message)
+        self.assertNotIn("src.filled", message)
+        self.assertNotIn("src.plain", message)
+
+    def test_unrecorded_ids_go_to_the_answer_key_folder(self):
+        """The ids are written one per line to unrecorded_defects.txt in the folder given."""
+        self.manifest.record("src.plain", 2)
+        with tempfile.TemporaryDirectory() as tmp:
+            self.manifest.write_unrecorded(Path(tmp) / "answer_key")
+            text = (Path(tmp) / "answer_key" / "unrecorded_defects.txt").read_text(encoding="utf-8")
+        self.assertEqual(text.split(), ["src.filled"])
 
 
 if __name__ == "__main__":

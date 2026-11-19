@@ -42,6 +42,20 @@ class Manifest:
         """Catalogued defects no emitter recorded: the catalogue and the code have drifted apart."""
         return [i for i in self._registry if i not in self._entries]
 
+    def incomplete_message(self, scale, seed):
+        """One line for a run that left declared defects unrecorded: scale, seed and counts, no defect ids."""
+        missing, declared = len(self.unrecorded()), len(self._registry)
+        return (f"scale {scale}, seed {seed}: the run recorded {declared - missing} of {declared} declared "
+                "defects, so its output is not complete and must be regenerated. Small scales cannot always "
+                "record all of them: use a larger scale or another seed. The ids are in "
+                "answer_key/unrecorded_defects.txt.")
+
+    def write_unrecorded(self, folder: Path):
+        """List the unrecorded ids, one per line, in the sealed answer-key folder."""
+        folder.mkdir(parents=True, exist_ok=True)
+        with open(folder / "unrecorded_defects.txt", "w", encoding="utf-8", newline="\n") as f:
+            f.write("\n".join(self.unrecorded()) + "\n")
+
     def note_file(self, rel_path, rows, kind):
         """Remember each written file and its row count, for the validator."""
         self.files[rel_path] = {"rows": int(rows), "kind": kind}
