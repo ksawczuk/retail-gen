@@ -12,12 +12,13 @@ Scenarios the generator handles on purpose, and why. One entry per case; code co
   new ties: for each Parquet entity and timestamp column, the number of distinct (key, timestamp) pairs is the same
   before and after.
 
-- **GEN-02 A small run still reaches every guarded POS step.** One step in the POS emitter ran only when a given store
-  had a nightly file on a given increment day, so at a small scale some seeds never reached it and the end-of-run guard
-  stopped the run (Bug 553). The step now runs on the first day from that day on that the store has a file, and on
-  the first nightly file written if the store has none. At the usual seed and scale the store has a file on the usual
-  day, so the step runs there as before, no random draw moves, and the files are byte-identical (checked by hashing
-  every file at scales 0.01 and 0.05 before and after).
+- **GEN-02 A small run still reaches every guarded POS step.** Two steps in the POS emitter ran only when a given store
+  had a nightly file on a given increment day, so at a small scale some seeds never reached one and the end-of-run
+  guard stopped the run (Bug 553). Each step now runs on the first day from its usual day on that the store has a
+  file; the first step falls back to the first nightly file written if its store has none, and the second step's
+  follow-up file goes to the next increment day (the same day if it is the last). At the usual seed and scale the store
+  has a file on the usual day, so each step runs there as before, no random draw moves, and the files are
+  byte-identical (checked by hashing every file at scales 0.01 and 0.05 before and after).
 - **GEN-03 A run that fails the guard is not marked finished.** The guard message names the scale and seed and never a
   defect id; the ids go to `answer_key/unrecorded_defects.txt`. `generate.py` writes `run.json` last, after the guard,
   so a failed run has none, and `validate.py` refuses output without it. The slow small-scale regression test is in
