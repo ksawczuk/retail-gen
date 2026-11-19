@@ -23,6 +23,16 @@ def fx_on(fx: pd.DataFrame, ts) -> np.ndarray:
 
 
 # ---------------------------------------------------------------- stores
+def us_slot(idx):
+    """Return the first slot from 1 up whose city can be replaced without removing the only QC store.
+    Called by generate_stores only, when no store is in the US (GEN-04)."""
+    qc_count = sum(1 for i in idx if ref.CITIES[i][1] == "QC")
+    for slot in range(1, len(idx)):
+        if not (ref.CITIES[idx[slot]][1] == "QC" and qc_count == 1):
+            return slot
+    return len(idx) - 1
+
+
 def generate_stores(cfg, rng):
     """Store master plus two dated events: a recode/rename (day 12) and a closure (day 20)."""
     n = cfg.n_stores
@@ -33,7 +43,7 @@ def generate_stores(cfg, rng):
     if not any(ref.CITIES[i][1] == "QC" for i in idx):
         idx[0] = qc[0]
     if not any(ref.CITIES[i][2] == "US" for i in idx):
-        idx[1] = us[0]
+        idx[us_slot(idx)] = us[0]
     idx.sort()
     counters, rows = {}, []
     for k, ci in enumerate(idx):
