@@ -23,3 +23,9 @@ Scenarios the generator handles on purpose, and why. One entry per case; code co
   so a failed run has none, and `validate.py` refuses output without it. The slow small-scale regression test is in
   `tests/test_small_scale.py` and runs only with `RETAILGEN_SLOW=1`.
 
+- **GEN-04 Each guaranteed store is placed without removing the other.** The store generator guarantees at least one
+  QC store and one US store. The US guarantee picks the first slot from 1 up that does not hold the only QC store, so at
+  the smallest scale (6 stores) the two never cancel and the run no longer stops in the store generator (Bug 677). A
+  slot differs from the old choice only where the old choice removed the only QC store, which stopped the run, so no run
+  that finished before changes (checked by hashing every file at scales 0.01 and 0.05 before and after). The seed list
+  test is `tests/test_store_slots.py`.

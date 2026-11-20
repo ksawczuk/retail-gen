@@ -22,8 +22,8 @@ def generate(out, seed):
 @unittest.skipUnless(SLOW, "set RETAILGEN_SLOW=1 to run the slow small-scale runs")
 class SmallScaleRunsTest(unittest.TestCase):
     def test_small_scale_runs_finish_at_chosen_seeds(self):
-        """Seeds 1, 5 and 7 used to stop the run at this scale (Bug 553); they now finish and write run.json."""
-        for seed in (1, 5, 7):
+        """Seeds 1, 5 and 7 used to stop the run at this scale (Bug 553), and seed 13 crashed in the store generator (Bug 677); they now finish and write run.json."""
+        for seed in (1, 5, 7, 13):
             with self.subTest(seed=seed), tempfile.TemporaryDirectory() as tmp:
                 out = Path(tmp) / "out"
                 result = generate(out, seed)
