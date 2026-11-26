@@ -244,6 +244,10 @@ _DEFECTS = [
            "nested 'consent' object appears from {day:%Y-%m-%d}", systemic=True),
     Defect("web.truncated_lines", "web", "events", "file",
            "truncated JSON lines (cut off mid-record) spliced into files"),
+    Defect("web.utm_campaign_missing", "web", "events", "completeness",
+           "sessions that came from an email click but carry no utm campaign"),
+    Defect("web.utm_campaign_variants", "web", "events", "format",
+           "utm campaign tags in the wrong case or with hyphens instead of underscores"),
 
     # ---------------- Inventory
     Defect("inventory.negative_on_hand", "inventory", "snapshots", "business_rule", "negative on_hand quantities"),

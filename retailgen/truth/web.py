@@ -11,13 +11,43 @@ NS = "datetime64[ns]"
 HOURS = [1, .6, .4, .3, .3, .5, 1, 1.5, 2, 2.5, 3, 3, 3, 3, 3, 3.5, 4, 4.5, 5, 5.5, 5, 4, 3, 2]
 
 
+def _email_sessions(cfg, rng, clicks):
+    """One session per email click inside the clickstream window: a landing page view and a product view.
+    Returns (sessions, events)."""
+    empty_sessions = pd.DataFrame(columns=["session_id", "order_id", "customer_id", "start", "channel", "utm_campaign"])
+    empty_events = pd.DataFrame(columns=["session_id", "event_type", "event_ts", "page", "sku", "order_id"])
+    if clicks is None or not len(clicks):
+        return empty_sessions, empty_events
+    c = clicks[clicks["click_ts"] >= cfg.clickstream_start].reset_index(drop=True)
+    if not len(c):
+        return empty_sessions, empty_events
+    start = (c["click_ts"] + pd.to_timedelta(rng.integers(1, 6, len(c)), unit="s")).astype(NS)
+    sessions = pd.DataFrame({"session_id": _hex(rng, len(c), 8), "order_id": None, "customer_id": c["customer_id"],
+                             "start": start, "channel": "web", "utm_campaign": c["utm_campaign"]})
+    events = pd.DataFrame({"session_id": sessions["session_id"], "event_type": "page_view", "event_ts": start,
+                           "page": "/c/" + c["utm_campaign"].astype(str), "sku": None, "order_id": None})
+    return sessions, events
+
+
+def _tag_first_sessions(sessions, prospect_tags):
+    """Give each Prospects customer's earliest signed-in session the paid-agency tags (in place)."""
+    if prospect_tags is None or not len(prospect_tags):
+        return
+    tags = prospect_tags.drop_duplicates("customer_id").set_index("customer_id")["utm_campaign"]
+    known = sessions[sessions["customer_id"].isin(tags.index) & sessions["utm_campaign"].isna()]
+    first = known.sort_values("start").drop_duplicates("customer_id")
+    sessions.loc[first.index, ["utm_source", "utm_medium"]] = ["agency", "paid"]
+    sessions.loc[first.index, "utm_campaign"] = first["customer_id"].map(tags).to_numpy()
+
+
 def _hex(rng, n, nbytes):
     raw = rng.bytes(n * nbytes)
     h = raw.hex()
     return [h[i * 2 * nbytes:(i + 1) * 2 * nbytes] for i in range(n)]
 
 
-def generate_clickstream(cfg, rng, orders, lines, customers, products, price_history, engine):
+def generate_clickstream(cfg, rng, orders, lines, customers, products, price_history, engine, email_clicks=None,
+                         prospect_tags=None):
     """Events from clickstream_start onward. 65% of online orders were tracked (consent); the
     rest of the traffic is browsing sessions that never bought."""
     o = orders[(orders["order_ts"] >= cfg.clickstream_start)]
@@ -85,7 +115,11 @@ def generate_clickstream(cfg, rng, orders, lines, customers, products, price_his
 
     events = pd.concat(ev, ignore_index=True)
     events["event_ts"] = events["event_ts"].astype(NS)
-    sessions = pd.concat([sess_conv.drop(columns=["order_ts"]), sess_nc], ignore_index=True)
+    # Email clicks land on the site in their own session, carrying the campaign's tag
+    sess_mail, mail_events = _email_sessions(cfg, rng, email_clicks)
+    events = pd.concat([events, mail_events], ignore_index=True)
+    events["event_ts"] = events["event_ts"].astype(NS)
+    sessions = pd.concat([sess_conv.drop(columns=["order_ts"]), sess_nc, sess_mail], ignore_index=True)
     dev = rng.integers(0, len(ref.DEVICES), len(sessions))
     sessions["device_type"] = [ref.DEVICES[i][0] for i in dev]
     sessions["os"] = [ref.DEVICES[i][1] for i in dev]
@@ -95,6 +129,14 @@ def generate_clickstream(cfg, rng, orders, lines, customers, products, price_his
     has_utm = rng.random(len(sessions)) < 0.4
     sessions["utm_source"] = np.where(has_utm, [ref.UTM_SOURCES[i][0] for i in utm], None)
     sessions["utm_medium"] = np.where(has_utm, [ref.UTM_SOURCES[i][1] for i in utm], None)
+    sessions["utm_campaign"] = None
+
+    # Email sessions say where they came from; a Prospects customer's first session carries the flight's tag
+    mail = sessions["session_id"].isin(set(sess_mail["session_id"]))
+    sessions.loc[mail, ["utm_source", "utm_medium"]] = ["newsletter", "email"]
+    sessions.loc[mail, "utm_campaign"] = sess_mail.set_index("session_id").loc[sessions.loc[mail, "session_id"],
+                                                                               "utm_campaign"].to_numpy()
+    _tag_first_sessions(sessions, prospect_tags)
     events = events.merge(sessions.drop(columns=["order_id", "start"]), on="session_id")
     priced = events["sku"].notna().to_numpy()
     events["price"] = np.nan

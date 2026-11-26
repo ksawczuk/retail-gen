@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from .campaigns import CANVAS_LIFT
+from .campaigns import CANVAS_LIFT, utm_tag
 
 
 LIFT_KINDS = ("seasonal", "newsletter", "reminder", "canvas")
@@ -49,7 +49,7 @@ def campaigns_table(specs):
     """One row per campaign with its design: kind, sends, lifts, window, holdout and code."""
     rows = []
     for s in specs:
-        rows.append({"campaign_id": s.campaign_id, "name": s.name, "kind": s.kind,
+        rows.append({"campaign_id": s.campaign_id, "name": s.name, "kind": s.kind, "utm_campaign": utm_tag(s),
                      "sends": ",".join(x.day for x in s.sends), "send_lifts": ",".join(f"{x.lift:g}" for x in s.sends),
                      "window_days": s.window_days, "half_life_days": s.half_life, "pullback": s.pullback,
                      "pullback_days": s.pullback_days if s.pullback else 0, "holdout": s.holdout,
@@ -186,6 +186,21 @@ def _flight_economics(rng, spec, signup, orders, pos_lines):
     return {"pulled_forward_customers": len(signup.moved.get(spec.campaign_id, [])),
             "incremental_customers": len(added), "value_per_incremental_customer": round(value, 2),
             "spend": spend}
+
+
+def email_clicks(engagement, campaigns):
+    """Every email click with its customer, time and the campaign's tag; read by the clickstream."""
+    clicks = engagement[engagement["event_type"] == "click"]
+    tags = campaigns.set_index("campaign_id")["utm_campaign"]
+    return pd.DataFrame({"customer_id": clicks["customer_id"].to_numpy(), "click_ts": clicks["event_ts"].to_numpy(),
+                         "utm_campaign": clicks["campaign_id"].map(tags).to_numpy()})
+
+
+def prospect_tags(prospects, campaigns):
+    """Each customer a Prospects flight brought or pulled forward, with the flight's tag."""
+    tags = campaigns.set_index("campaign_id")["utm_campaign"]
+    return pd.DataFrame({"customer_id": prospects["customer_id"].to_numpy(),
+                         "utm_campaign": prospects["campaign_id"].map(tags).to_numpy()})
 
 
 def prospect_customers_table(signup):

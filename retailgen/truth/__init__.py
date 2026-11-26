@@ -18,8 +18,8 @@ from .demand import DemandEngine
 from .lifecycle import CustomerLifecycle
 from .seasonality import Seasonality
 from .campaigns import CampaignContext, calendar, email_campaigns
-from .campaign_truth import (assignment_table, campaigns_table, code_audiences, groups_by_campaign,
-                             prospect_customers_table, truth_table)
+from .campaign_truth import (assignment_table, campaigns_table, code_audiences, email_clicks, groups_by_campaign,
+                             prospect_customers_table, prospect_tags, truth_table)
 from .engagement import engagement_events
 from .signups import apply_signup_campaigns
 
@@ -83,16 +83,18 @@ def build_truth(cfg, rng, log=print) -> Truth:
                       pos[["customer_id", "utc_ts"]].rename(columns={"utc_ts": "ts"})]).dropna()
     last_activity = last.groupby("customer_id")["ts"].max()
     cust_ev, addr_ev, deleted = generate_crm_changes(cfg, rng, customers, addresses, last_activity)
+    log("truth: email events")
+    engagement = engagement_events(rng, engine.days, ids, ctx.sends, signup.sends)
+    campaign_rows = campaigns_table(specs)
+    prospects = prospect_customers_table(signup)
     log("truth: clickstream")
-    clicks = generate_clickstream(cfg, rng, orders, lines, customers, products, price_history, engine)
+    clicks = generate_clickstream(cfg, rng, orders, lines, customers, products, price_history, engine,
+                                  email_clicks(engagement, campaign_rows), prospect_tags(prospects, campaign_rows))
     log("truth: inventory")
     inventory = generate_inventory(cfg, rng, stores, store_events, products)
-    log("truth: campaign answer key and engagement")
-    campaign_rows = campaigns_table(specs)
+    log("truth: campaign answer key")
     assignment = assignment_table(ctx, ids, engine.days, signup)
     effects = truth_table(rng, specs, ctx, signup, purchases, engine.days, ids, orders, pos)
-    prospects = prospect_customers_table(signup)
-    engagement = engagement_events(rng, engine.days, ids, ctx.sends, signup.sends)
     t = Truth(fx, stores, store_events, categories, suppliers, products, price_history, promotions,
               customers, addresses, cust_ev, addr_ev, deleted, orders, lines, payments, shipments,
               returns, pos, clicks, inventory, campaign_rows, assignment, effects, prospects, engagement)

@@ -3,6 +3,7 @@
 Built by build_truth: the signup campaigns (gain loyalty, Prospects) change the customers before the demand engine
 is built; the email campaigns are DemandModifiers the engine runs day by day.
 """
+import re
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -70,6 +71,13 @@ def _seasonal(cid, name, sends, lift, window, half_life, holdout="none", code=No
     send_list = (Send(first, lift),) + tuple(s if isinstance(s, Send) else Send(s) for s in rest)
     return CampaignSpec(cid, name, "seasonal", send_list, window, half_life, pullback=pullback, holdout=holdout,
                         promo_code=code, code_leaks=leaks, no_consent_sends=no_consent, categories=categories)
+
+
+def utm_tag(spec):
+    """The campaign's tracking tag: Prospects flights as prs_YYYY_MM, email campaigns as their name in snake case."""
+    if spec.kind == "prospects":
+        return "prs_" + spec.sends[0].day[:7].replace("-", "_")
+    return re.sub(r"[^a-z0-9]+", "_", spec.name.lower().replace("'", "")).strip("_")
 
 
 def calendar():
