@@ -8,8 +8,8 @@ bronze → cleansing → silver → gold.
 
 The company is *Larchwood Supply Co.*, a fictional Canadian retailer with nine source systems:
 CRM, PIM, store ops, e-commerce OMS, POS, promotions, web analytics, inventory and FX. There
-are ~21 months of history (2025-01-01 → 2026-09-30), then 30 daily increments
-(2026-10-01 → 2026-10-30) that you release one day at a time, so your ingestion sees files
+are ~21 months of history (2025-01-01 → 2026-09-30), then 92 daily increments
+(2026-10-01 → 2026-12-31) that you release one day at a time, so your ingestion sees files
 arrive the way it would in production.
 
 ### How it is built

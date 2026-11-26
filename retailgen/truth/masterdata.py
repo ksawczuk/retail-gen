@@ -222,6 +222,8 @@ def generate_promotions(cfg) -> pd.DataFrame:
             (f"BOXING{yy}", "pct", 30, None, f"{year}-12-26", f"{year + 1}-01-02", "web,app,pos"),
         ]
     rows.append(("HALLOWEEN26", "pct", 15, None, "2026-10-24", "2026-10-31", "web,app,pos"))
+    rows.append(("GIFT25", "pct", 10, None, "2025-12-05", "2025-12-15", "web,app"))
+    rows.append(("GIFT26", "pct", 10, None, "2026-11-28", "2026-12-08", "web,app"))
     p = pd.DataFrame(rows, columns=["code", "promo_type", "value", "min_spend", "starts_at", "ends_at", "channels"])
     p["starts_at"] = pd.to_datetime(p["starts_at"]).astype(NS)
     p["ends_at"] = pd.to_datetime(p["ends_at"]).astype(NS)
