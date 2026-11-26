@@ -29,3 +29,24 @@ Scenarios the generator handles on purpose, and why. One entry per case; code co
   slot differs from the old choice only where the old choice removed the only QC store, which stopped the run, so no run
   that finished before changes (checked by hashing every file at scales 0.01 and 0.05 before and after). The seed list
   test is `tests/test_store_slots.py`.
+
+## Pusher
+
+- **PSH-01 `next` records a day only after a clean push.** A day goes into the state file only when every file was
+  sent or skipped; with any failed file the run exits 1 and records nothing, so the next run pushes the same day again
+  (files already in the volume with the same size are skipped). A dry run records nothing either. The state file is
+  replaced through a temporary file and a rename, so a crash leaves the old or the new list, never a partial one.
+- **PSH-02 Only the newest pushed day can be unmarked.** The pushed days must stay an unbroken run from the first
+  increment day, because the daily load in bronze refuses a day whose earlier days are not complete. Removing an older
+  day while a later one stays recorded would leave a gap that `next` fills out of order, so `unmark` refuses it and
+  names the day to unmark first. `unmark` changes only the state file; removing the day's files from the volume is a
+  separate runbook step.
+- **PSH-03 The increment days come from the data, and the state path has no default.** `next` reads the days from the
+  `increments/day=` folders, so the feed ends wherever the generated data ends with no date in the code. The state
+  path must be given: a default would let a run whose state folder was not mounted start again at the first day. A
+  missing state folder, a state inside the landing folder, or a file that is not an unbroken run of increment days stops
+  the run with exit 2.
+- **PSH-04 One run at a time.** `next` and `unmark` hold a lock file beside the state while they run, created
+  exclusively, so the daily timer and a manual run cannot both change the state. A second run exits 2 and names the lock.
+  A lock left by a killed run is removed by hand, once no pusher is running; the run does not guess whether a lock is
+  stale.
