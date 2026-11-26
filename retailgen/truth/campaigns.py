@@ -133,7 +133,7 @@ def calendar():
                               parent=parent.campaign_id))
 
     # Monthly newsletter to members, on the 10th
-    months = pd.date_range("2025-01-10", "2026-12-10", freq="MS") + pd.Timedelta(days=9)
+    months = pd.date_range("2025-01-01", "2026-12-01", freq="MS") + pd.Timedelta(days=9)
     c.append(CampaignSpec("CMP-NL", "Monthly newsletter", "newsletter",
                           tuple(Send(m.strftime("%Y-%m-%d"), 0.005) for m in months), 7, 3.0))
 

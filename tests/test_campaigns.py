@@ -26,6 +26,9 @@ class CalendarTest(unittest.TestCase):
         self.assertEqual(kinds["gain_loyalty"], 7)
         self.assertEqual(kinds["prospects"], 9)
         self.assertEqual(kinds["newsletter"], 1)
+        newsletter = [s for s in specs if s.kind == "newsletter"][0]
+        self.assertEqual(len(newsletter.sends), 24)
+        self.assertEqual((newsletter.sends[0].day, newsletter.sends[-1].day), ("2025-01-10", "2026-12-10"))
         self.assertEqual(kinds["canvas"], 1)
 
     def test_holdouts_follow_decision_4(self):
