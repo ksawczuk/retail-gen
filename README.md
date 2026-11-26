@@ -116,7 +116,8 @@ data is kept. The dataset is sized so a full rerun is cheap.
 - `answer_key/` holds everything that was done to the data. Use `defects.md` to score
   your bronze/silver findings, and `truth/` to check silver/gold numbers against what
   really happened. Customer `person_id` in `truth/customers.parquet` is the identity
-  resolution answer.
+  resolution answer. The `campaign*`, `prospect_customers` and `engagement_events` tables
+  hold the marketing truth: each campaign's audience, holdout and true effect.
 - Possible gold marts, as starting points only: daily sales by channel/store, customer
   360/RFM, product and category performance, returns and refunds, web funnel conversion,
   inventory cover.

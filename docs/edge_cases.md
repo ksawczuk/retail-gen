@@ -60,3 +60,33 @@ Scenarios the generator handles on purpose, and why. One entry per case; code co
   run up to about 9% above the old curve; the volume checks compare against the curve with the peaks included. The
   validator's future-order cut-off moved from 2026-11-01 to 2027-01-01 with the new increment end; the planted
   future-dated orders land in mid-2027.
+
+- **GEN-11 The engine draws both channels day by day, so the byte baseline was reset again.** Win-back audiences and
+  the post-purchase email depend on purchases already drawn, in either channel, so `DemandEngine.draw_all` loops the
+  days once and draws online and store together (Story 771). The random draws come in a new order, and every landing
+  file changes on purpose. `draw(channel)` remains for one channel on its own.
+- **GEN-12 Campaign lifts are combined, damped and credited.** Each campaign gives its treated customers a relative
+  lift for the day. The largest lift counts in full and every other one at 70%; a pull-forward campaign's negative
+  lift after its window adds as it is. The day's expected total rises with the combined weights, and a purchase is
+  marked as caused by the campaign with the largest lift with probability (factor - 1) / factor, so the answer key
+  counts incremental purchases from the drawn rows. The realized lift (incremental over baseline purchases in the
+  window) is below the nominal lift because each send's lift halves every half-life inside the window.
+- **GEN-13 Win-back works through comebacks.** A churned customer has no buying weight to lift, so a win-back email
+  brings a share of its churned audience back, setting their comeback within 30 days; the answer key counts the
+  comebacks. The August 2025 win-back calls 45 days lapsed, so its audience is mostly active and its true effect is
+  zero. The early-2025 win-backs reach almost no one: purchases before 2025 are not generated, so few customers have a
+  180-day gap that early.
+- **GEN-14 Prospects flights move signups within their side of the cut-over and add real customers.** A flight pulls
+  15% more signups into itself from customers due in the 60 days after it, and only those whose new and old signup
+  times fall on the same side of 2026-10-01, so the CRM extract and the change feed stay consistent. Their addresses
+  and, when they joined at signup, their join dates move with them. Three flights also add new customers with full
+  records and addresses (`add_customers`), created in the flight; ids continue after the highest existing one, so ids
+  no longer follow signup order, and the customers are re-sorted by signup before the engine. Spend for those flights
+  is 2 to 3 times the new customers' purchases (at least 50 per customer), and the others are priced like them, so
+  every flight costs more per incremental customer than that customer is worth.
+- **GEN-15 A campaign's promo code goes to its audience.** Orders by treated customers in the code's window use it
+  (40% of them); a leaking code also reaches the holdout and everyone else as 3% and 6% of all its redemptions. A
+  campaign without a holdout leaks only outside. Codes without a campaign behave as before.
+- **GEN-16 Gain-loyalty emails are sent before the engine.** They change join dates, which the engine and the card
+  scan need, so they run on the customers first; their sends count in the email events but not in fatigue or
+  unsubscribes.
