@@ -72,6 +72,35 @@ def parquet_rows(path):
         return None
 
 
+def braze_checks(stage, cnt):
+    """The Braze files: exactly one _resend, its original a day earlier and smaller; with fastavro, the original
+    fails to read and duplicate event ids match the manifest. Called by main unless the run skipped Braze."""
+    resends = files(stage, "**/braze/*/*_resend.avro")
+    originals = [p.parent.parent.parent / f"day={(pd.Timestamp(p.parent.parent.parent.name[4:]) - pd.Timedelta(days=1)):%Y-%m-%d}"
+                 / p.parent.parent.name / p.parent.name / p.name.replace("_resend", "") for p in resends]
+    ok = len(resends) == 1 and originals[0].exists() and originals[0].stat().st_size < resends[0].stat().st_size
+    check("one Braze file cut off and re-sent whole the next day", ok, ", ".join(p.name for p in resends))
+    try:
+        import fastavro
+    except ImportError:
+        print("SKIP  Braze event checks: fastavro is not installed, so the Avro files cannot be read")
+        return
+    ids, cut_off_reads = [], True
+    for p in files(stage, "**/braze/*/*.avro"):
+        try:
+            with open(p, "rb") as handle:
+                ids.extend(r["id"] for r in fastavro.reader(handle))
+        except Exception:
+            if originals and p == originals[0]:
+                cut_off_reads = False
+                continue
+            unreadable.append(p.name)
+    check("the cut-off Braze file does not read", not cut_off_reads, originals[0].name if originals else "")
+    dups = len(ids) - len(set(ids))
+    check("Braze duplicate event ids = manifest", dups == cnt("braze.duplicate_events"),
+          f"{dups} vs {cnt('braze.duplicate_events')}")
+
+
 def main(out):
     out = Path(out)
     stage = out / "landing_staging"
@@ -99,17 +128,25 @@ def main(out):
     check("no CRLF line endings anywhere", not crlf, ", ".join(crlf[:3]))
     check("only the CRM full extract has a BOM", boms == ["customers_full_20260930.csv"], str(boms))
 
-    # web: truncated lines and duplicate event ids
-    bad, ids = 0, []
+    # web: truncated lines, duplicate event ids, and email sessions with no campaign tag
+    bad, ids, untagged = 0, [], set()
     for p in files(stage, "**/web/events/*.jsonl.gz"):
         for line in read_gz(p).decode("utf-8", errors="replace").splitlines():
             try:
-                ids.append(json.loads(line)["event_id"])
+                rec = json.loads(line)
             except json.JSONDecodeError:
                 bad += 1
+                continue
+            ids.append(rec["event_id"])
+            utm = rec.get("utm") or {}
+            if utm.get("source") == "newsletter" and utm.get("campaign") is None:
+                untagged.add(rec["session"]["id"])
     check("web truncated lines = manifest", bad == cnt("web.truncated_lines"), f"{bad} vs {cnt('web.truncated_lines')}")
     dups = len(ids) - len(set(ids))
     check("web duplicate event_ids = manifest", dups == cnt("web.duplicate_events"), f"{dups} vs {cnt('web.duplicate_events')}")
+    lost = cnt("web.utm_campaign_missing")
+    check("newsletter sessions without a campaign tag cover the manifest's count (other newsletter traffic has none)",
+          len(untagged) >= lost - bad, f"{len(untagged)} vs at least {lost}")
 
     # other JSON Lines parse cleanly
     broken = 0
@@ -193,6 +230,21 @@ def main(out):
     mism = [k for k, v in man["files"].items() if v["kind"] == "parquet" and
             parquet_rows(stage / k) != v["rows"]]
     check("Parquet row counts match manifest", not mism, ", ".join(mism[:3]))
+
+    # ads: each agency reports in one currency, and both currencies appear
+    spend = [read_text(p) for p in files(stage, "**/ads/spend/*.csv")]
+    if spend:
+        rows = pd.read_csv(io.StringIO("".join(s if k == 0 else s.split("\n", 1)[1] for k, s in enumerate(spend))))
+        per_agency = rows.groupby("agency")["currency"].nunique()
+        check("each ad agency reports in one currency, CAD and USD both present",
+              per_agency.max() == 1 and set(rows["currency"]) == {"CAD", "USD"}, str(per_agency.to_dict()))
+
+    # Braze: one cut-off file, re-sent whole the next day; duplicate event ids when the files can be read
+    skipped = json.loads((out / "answer_key" / "run.json").read_text(encoding="utf-8")).get("skipped_sources", [])
+    if "braze" in skipped:
+        print("SKIP  Braze checks: the run left the braze source out")
+    else:
+        braze_checks(stage, cnt)
 
     check("every file opens cleanly", not unreadable, ", ".join(sorted(set(unreadable))[:3]))
 
