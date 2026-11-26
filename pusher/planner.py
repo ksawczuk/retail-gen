@@ -5,12 +5,14 @@ Called by the entry point after the mode is parsed; hands the pusher an ordered 
 
 import re
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 from pusher.errors import InputError
 
 FORBIDDEN_NAMES = ("answer_key", "out")
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9_.=-]+$")
+_DAY_FOLDER = re.compile(r"^day=(\d{4}-\d{2}-\d{2})$")
 
 
 @dataclass(frozen=True)
@@ -38,6 +40,24 @@ class FilePlanner:
         # The answer key and the generator's out folder must never be on the path
         if any(part.lower() in FORBIDDEN_NAMES for part in self._root.parts):
             raise InputError("the landing folder must not be inside a forbidden folder")
+
+    def increment_days(self):
+        """Return the increment days in date order, from the `increments/day=YYYY-MM-DD` folders.
+        Called by `next` and `unmark`; raises InputError when there are none."""
+        # Read each day folder's date; anything else in increments/ is ignored
+        days = []
+        increments = self._root / "increments"
+        if increments.is_dir():
+            for folder in increments.iterdir():
+                match = _DAY_FOLDER.match(folder.name)
+                if folder.is_dir() and match:
+                    try:
+                        days.append(date.fromisoformat(match.group(1)))
+                    except ValueError:
+                        continue
+        if not days:
+            raise InputError("no increment day folders under increments/")
+        return sorted(days)
 
     def plan(self, mode):
         """Return the sorted items for a mode; raises InputError if the folder is missing or holds no files."""

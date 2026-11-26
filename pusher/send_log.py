@@ -19,6 +19,10 @@ class SendLog:
         """Write the closing line with the counts."""
         print(f"DONE sent={result.sent} skipped={result.skipped} failed={result.failed}", file=self._out)
 
+    def note(self, line):
+        """Write one line about the state: NEXT, RECORDED, NOT RECORDED, ALL PUSHED or UNMARKED."""
+        print(line, file=self._out)
+
     def error(self, message):
         """Write a line for a run that could not start."""
         print(f"ERROR {message}", file=self._out)

@@ -47,11 +47,17 @@ class PushConfig:
             host = _clean_host(host)
         if token is not None and any(ch.isspace() for ch in token):
             raise InputError("DATABRICKS_TOKEN must not contain whitespace")
-        landing_root = Path(env.get("PUSH_LANDING_ROOT") or DEFAULT_LANDING_ROOT)
+        landing_root = landing_root_from(env)
         # An unset or empty HTTPS_PROXY means a direct connection; anything given must be valid, even in a dry run
         proxy_value = (env.get("HTTPS_PROXY") or "").strip()
         proxy = _clean_proxy(proxy_value) if proxy_value else None
         return cls(host=host, token=token, dry_run=dry_run, landing_root=landing_root, proxy=proxy)
+
+
+def landing_root_from(env):
+    """Return the landing folder from PUSH_LANDING_ROOT, or the container's mount path.
+    Used by every run, including `unmark`, which needs no host or token."""
+    return Path(env.get("PUSH_LANDING_ROOT") or DEFAULT_LANDING_ROOT)
 
 
 def _clean_proxy(value):
