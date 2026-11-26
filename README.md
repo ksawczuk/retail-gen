@@ -54,6 +54,10 @@ to Databricks. The data works for any platform's tutorial.
 | raw size | ~300 MB |
 | run time | ~10–15 min |
 
+The counts, size and run time above were measured on the 30-day window. The window now runs to 2026-12-31
+(92 increment days); the full-scale figures for it are not measured yet. At `--scale 0.1` the 92-day run
+takes about 3.5 minutes and writes about 42 MB.
+
 ## Generate
 
 Needs Python 3 with numpy, pandas and pyarrow (built with numpy 2.4, pandas 3.0, pyarrow 23):

@@ -23,8 +23,7 @@ def raw_draw(cfg):
 
 
 def guarded_seed():
-    """The first seed whose raw draw at scale 0.01 has no US store and its only QC store at slot 1, the case the
-    US guard once removed (Bug 677). Found by shape, so a change in the random stream does not lose the case."""
+    """The first seed whose raw draw at scale 0.01 has no US store and its only QC store at slot 1 (Bug 677)."""
     for seed in range(1, 1000):
         draw = raw_draw(Config(scale=0.01, seed=seed))
         no_us = not any(ref.CITIES[i][2] == "US" for i in draw)
