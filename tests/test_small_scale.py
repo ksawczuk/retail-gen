@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from tests.generator_args import source_args
 
 REPO = Path(__file__).resolve().parent.parent
 SLOW = os.environ.get("RETAILGEN_SLOW") == "1"
@@ -15,7 +16,8 @@ def generate(out, seed):
     """Run generate.py at scale 0.01 with the given seed into the given folder.
     Called by the test below once per seed; returns the finished process."""
     return subprocess.run(
-        [sys.executable, "generate.py", "--scale", "0.01", "--seed", str(seed), "--out", str(out), "--no-truth"],
+        [sys.executable, "generate.py", "--scale", "0.01", "--seed", str(seed), "--out", str(out), "--no-truth",
+         *source_args()],
         cwd=REPO, capture_output=True, text=True)
 
 

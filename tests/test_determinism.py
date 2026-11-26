@@ -7,6 +7,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from tests.generator_args import source_args
+
 REPO = Path(__file__).resolve().parent.parent
 
 
@@ -14,7 +16,7 @@ def generate(out):
     """Run generate.py at scale 0.01 with the default seed into the given folder.
     Called twice by the test below; skips the truth tables since only landing files are compared."""
     result = subprocess.run(
-        [sys.executable, "generate.py", "--scale", "0.01", "--out", str(out), "--no-truth"],
+        [sys.executable, "generate.py", "--scale", "0.01", "--out", str(out), "--no-truth", *source_args()],
         cwd=REPO, capture_output=True, text=True)
     return result.returncode
 
