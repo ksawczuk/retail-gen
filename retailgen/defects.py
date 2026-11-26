@@ -251,6 +251,12 @@ _DEFECTS = [
     Defect("web.utm_campaign_variants", "web", "events", "format",
            "utm campaign tags in the wrong case or with hyphens instead of underscores"),
 
+    # ---------------- Ad agencies
+    Defect("ads.usd_agency", "ads", "spend", "format",
+           "{agency} reports spend in US dollars; the other agency in Canadian dollars", systemic=True),
+    Defect("ads.missing_days", "ads", "spend", "completeness",
+           "agency spend rows for some flight days never arrive"),
+
     # ---------------- Inventory
     Defect("inventory.negative_on_hand", "inventory", "snapshots", "business_rule", "negative on_hand quantities"),
     Defect("inventory.missing_store_weeks", "inventory", "snapshots", "completeness",
