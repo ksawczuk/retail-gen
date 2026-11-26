@@ -17,7 +17,7 @@ from .baskets import BasketBuilder
 from .demand import DemandEngine
 from .lifecycle import CustomerLifecycle
 from .seasonality import Seasonality
-from .campaigns import CampaignContext, calendar, email_campaigns
+from .campaigns import POST_UNSUBSCRIBE_SENDS, CampaignContext, calendar, email_campaigns
 from .campaign_truth import (assignment_table, campaigns_table, code_audiences, consent_sync, email_clicks,
                              groups_by_campaign, prospect_customers_table, prospect_tags, truth_table)
 from .engagement import engagement_events
@@ -113,7 +113,8 @@ def build_demand(cfg, rng, customers, products, categories, specs=()):
     lifecycle = CustomerLifecycle.build(rng, customers, len(category_names))
     ctx = CampaignContext(rng, days, customers["created_at"].to_numpy().astype("datetime64[ns]"),
                           customers["marketing_opt_in"].to_numpy(bool),
-                          customers["loyalty_join_at"].to_numpy().astype("datetime64[ns]"), lifecycle)
+                          customers["loyalty_join_at"].to_numpy().astype("datetime64[ns]"), lifecycle,
+                          post_unsubscribe_left=cfg.count(POST_UNSUBSCRIBE_SENDS))
     modifiers = email_campaigns(specs, ctx)
     engine = DemandEngine(rng, days, customers["created_at"], customers["activity"], lifecycle, seasons, modifiers)
     promoted = {s.campaign_id: s.categories for s in specs if s.categories}

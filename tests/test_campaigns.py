@@ -134,7 +134,7 @@ class AnswerKeyTest(unittest.TestCase):
     def test_engagement_flaws_are_present_and_bounded(self):
         ev = self.t.engagement_events
         sends = ev[ev["event_type"] == "send"]
-        self.assertLessEqual(int(sends["after_unsubscribe"].sum()), POST_UNSUBSCRIBE_SENDS)
+        self.assertLessEqual(int(sends["after_unsubscribe"].sum()), Config(scale=0.01).count(POST_UNSUBSCRIBE_SENDS))
         wrong = set(sends.loc[sends["no_consent"], "campaign_id"])
         self.assertTrue(wrong <= {"CMP-06", "CMP-16"})
         opens = ev[ev["event_type"] == "open"]
