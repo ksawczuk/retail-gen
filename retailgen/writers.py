@@ -116,13 +116,13 @@ class Output:
         self.manifest.note_file(rel, len(df), "parquet")
         return rel
 
-    def avro(self, records, schema, day, source, entity, filename, truncate_at=None):
-        """Write one deflate-compressed Avro file. `truncate_at` cuts the bytes there, for a file that arrives
-        damaged. Called by the Braze emitter."""
+    def avro(self, records, schema, day, source, entity, filename, keep_share=None):
+        """Write one deflate-compressed Avro file. `keep_share` keeps only that share of the bytes, for a file that
+        arrives cut off. Called by the Braze emitter."""
         rel = self.rel(day, source, entity, filename)
         data = self._avro.to_bytes(schema, records)
-        if truncate_at is not None:
-            data = data[:truncate_at]
+        if keep_share is not None:
+            data = data[:int(len(data) * keep_share)]
         self._path(rel).write_bytes(data)
         self.manifest.note_file(rel, len(records), "avro")
         return rel

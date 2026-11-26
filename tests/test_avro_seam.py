@@ -41,10 +41,10 @@ class SeamTest(unittest.TestCase):
             self.assertEqual(man.files[rel]["rows"], 2)
             self.assertEqual(writer.calls[0][0], SCHEMA)
 
-    def test_truncate_cuts_the_file(self):
+    def test_keep_share_cuts_the_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = Output(Path(tmp), Manifest(), avro_writer=RecordingWriter())
-            rel = out.avro([{"id": "a", "n": 1}], SCHEMA, None, "braze", "sends", "s.avro", truncate_at=4)
+            rel = out.avro([{"id": "a", "n": 1}], SCHEMA, None, "braze", "sends", "s.avro", keep_share=0.4)
             self.assertEqual((Path(tmp) / rel).read_bytes(), b"0123")
 
 

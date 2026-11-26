@@ -3,7 +3,7 @@ defects, and writes its files. Every defect is recorded in the manifest."""
 from . import crm, pim, oms, pos
 from .small import emit_stores, emit_fx, emit_promo
 from .web_inventory import emit_web, emit_inventory
-from . import ads
+from . import ads, braze
 
 EMITTERS = [
     ("crm", crm.emit),
@@ -16,4 +16,5 @@ EMITTERS = [
     ("web", emit_web),
     ("inventory", emit_inventory),
     ("ads", ads.emit),
+    ("braze", braze.emit),
 ]
