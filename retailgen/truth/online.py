@@ -24,17 +24,18 @@ def _hours(rng, n, lo, hi):
     return pd.to_timedelta(rng.uniform(lo, hi, n), unit="h")
 
 
-def generate_online(cfg, rng, customers, addresses, price_history, promos, fx, engine, baskets):
+def generate_online(cfg, rng, customers, addresses, price_history, promos, fx, days, purchases, baskets):
     """Online orders with their lines, payments, shipments and returns. Who orders and when comes from the
-    demand engine; the lines from the basket builder. Called by build_truth after the customers."""
-    # Draw the orders from the demand engine and give each a time of day, in time order
-    day_idx, cust_idx = engine.draw(online_channel(cfg))
+    demand engine's purchases; the lines from the basket builder. Called by build_truth after the draw."""
+    # Give each drawn order a time of day, in time order
+    day_idx, cust_idx, credit = purchases.day_index, purchases.customer_index, purchases.campaign
     n = len(day_idx)
-    day = engine.days.to_numpy().astype(NS)[day_idx]
+    day = days.to_numpy().astype(NS)[day_idx]
     ts = (day + seconds_in_day(rng, n, ONLINE_HOURS).astype("timedelta64[s]")).astype(NS)
     order = np.argsort(ts, kind="stable")
-    ts, day_idx, cust_idx = ts[order], day_idx[order], cust_idx[order]
+    ts, day_idx, cust_idx, credit = ts[order], day_idx[order], cust_idx[order], credit[order]
     orders = pd.DataFrame({"order_id": [f"ORD-{100000001 + i}" for i in range(n)], "order_ts": ts})
+    orders["campaign_credit"] = credit
 
     # Who ordered: the engine's customer, or a guest
     guest = cust_idx < 0

@@ -9,8 +9,8 @@ import pandas as pd
 
 from .masterdata import generate_fx, generate_stores, generate_catalog, generate_promotions
 from .customers import generate_customers, generate_crm_changes
-from .online import generate_online
-from .pos import generate_pos
+from .online import generate_online, online_channel
+from .pos import generate_pos, store_channel
 from .web import generate_clickstream
 from .inventory import generate_inventory
 from .baskets import BasketBuilder
@@ -54,12 +54,14 @@ def build_truth(cfg, rng, log=print) -> Truth:
     customers, addresses = generate_customers(cfg, rng)
     log("truth: lifecycle and demand")
     engine, baskets = build_demand(cfg, rng, customers, products, categories)
+    online, store = online_channel(cfg), store_channel(cfg)
+    purchases = engine.draw_all([online, store])
     log("truth: online orders")
     orders, lines, payments, shipments, returns = generate_online(
-        cfg, rng, customers, addresses, price_history, promotions, fx, engine, baskets)
+        cfg, rng, customers, addresses, price_history, promotions, fx, engine.days, purchases[online.name], baskets)
     log("truth: point of sale")
     pos = generate_pos(cfg, rng, stores, store_events, customers, price_history, promotions,
-                       fx, orders, lines, returns, engine, baskets)
+                       fx, orders, lines, returns, engine.days, purchases[store.name], baskets)
     log("truth: CRM changes")
     last = pd.concat([orders[["customer_id", "order_ts"]].rename(columns={"order_ts": "ts"}),
                       pos[["customer_id", "utc_ts"]].rename(columns={"utc_ts": "ts"})]).dropna()

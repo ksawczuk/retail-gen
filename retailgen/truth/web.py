@@ -6,7 +6,6 @@ from .. import reference as ref
 from ..util import bounded_weighted_pick, seconds_in_day
 from .masterdata import price_lookup
 from .demand import NONE
-from .online import online_channel
 
 NS = "datetime64[ns]"
 HOURS = [1, .6, .4, .3, .3, .5, 1, 1.5, 2, 2.5, 3, 3, 3, 3, 3, 3.5, 4, 4.5, 5, 5.5, 5, 4, 3, 2]
@@ -62,7 +61,7 @@ def generate_clickstream(cfg, rng, orders, lines, customers, products, price_his
     day_index = ((start.astype("datetime64[D]") - engine.days[0].to_datetime64().astype("datetime64[D]"))
                  // np.timedelta64(1, "D")).astype(int)
     browser = np.full(m, NONE)
-    browser[signed_in] = engine.pick(online_channel(cfg), day_index[signed_in])
+    browser[signed_in] = engine.pick(day_index[signed_in])
     ids = customers["customer_id"].to_numpy()
     sess_nc = pd.DataFrame({"session_id": _hex(rng, m, 8), "order_id": None,
                             "customer_id": np.where(browser >= 0, ids[np.maximum(browser, 0)], None),

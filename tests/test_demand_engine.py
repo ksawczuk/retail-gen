@@ -17,24 +17,24 @@ N = 2_000
 
 
 class Scale(DemandModifier):
-    """Multiplies every weight by a factor; stands in for a campaign."""
+    """Lifts every customer by the same amount; stands in for a broadcast campaign."""
 
-    def __init__(self, factor):
-        self.factor = factor
+    def __init__(self, lift, campaign_id="scale"):
+        self.amount, self.campaign_id = lift, campaign_id
 
-    def weights(self, channel, day_index, weights):
-        return weights * self.factor
+    def lift(self, day_index, state):
+        return np.full(N, self.amount)
 
 
 class Favor(DemandModifier):
-    """Multiplies one customer's weight; stands in for a targeted campaign."""
+    """Lifts one customer; stands in for a targeted campaign."""
 
-    def __init__(self, position, factor):
-        self.position, self.factor = position, factor
+    def __init__(self, position, lift, campaign_id="favor"):
+        self.position, self.amount, self.campaign_id = position, lift, campaign_id
 
-    def weights(self, channel, day_index, weights):
-        out = weights.copy()
-        out[self.position] *= self.factor
+    def lift(self, day_index, state):
+        out = np.zeros(N)
+        out[self.position] = self.amount
         return out
 
 
@@ -117,17 +117,34 @@ class ModifierTest(unittest.TestCase):
 
     def test_scaling_every_weight_scales_the_total(self):
         base = len(engine(7).draw(STORE)[0])
-        lifted = len(engine(7, [Scale(1.1)]).draw(STORE)[0])
+        lifted = len(engine(7, [Scale(0.1)]).draw(STORE)[0])
         self.assertAlmostEqual(lifted / base, 1.1, delta=0.02)
 
     def test_favoring_one_customer_raises_their_share(self):
         plain = (engine(8).draw(STORE)[1] == 0).sum()
-        favored = (engine(8, [Favor(0, 10.0)]).draw(STORE)[1] == 0).sum()
+        favored = (engine(8, [Favor(0, 9.0)]).draw(STORE)[1] == 0).sum()
         self.assertGreater(favored, 5 * max(plain, 1))
 
-    def test_pick_uses_the_modified_weights(self):
-        e = engine(9, [Favor(0, 1e9)])
-        self.assertTrue((e.pick(ONLINE, np.full(50, 100)) == 0).all())
+    def test_overlapping_lifts_are_damped(self):
+        """Two +10% campaigns on everyone give +17% (the second at 70%), not +20%."""
+        e = engine(11, [Scale(0.1, "a"), Scale(0.1, "b")])
+        factor, _, _ = e.campaign_factor(0, None)
+        np.testing.assert_allclose(factor, 1.17)
+
+    def test_incremental_purchases_are_credited_to_the_biggest_lift(self):
+        """With +100% from one campaign and +10% from another, about 0.65 of purchases are incremental, all
+        credited to the bigger one."""
+        e = engine(12, [Scale(1.0, "big"), Scale(0.1, "small")])
+        purchases = e.draw_all([STORE])["store"]
+        credited = purchases.campaign[purchases.campaign != None]  # noqa: E711
+        self.assertEqual(set(credited), {"big"})
+        self.assertAlmostEqual(len(credited) / len(purchases.campaign), 1.07 / 2.07, delta=0.02)
+
+    def test_pick_uses_base_weights_and_only_signed_up_customers(self):
+        created = np.full(N, np.datetime64("2026-01-01", "ns"))
+        created[:5] = np.datetime64("2021-01-01", "ns")
+        e = engine(9, created=created)
+        self.assertTrue((e.pick(np.full(200, 10)) < 5).all())
 
 
 if __name__ == "__main__":

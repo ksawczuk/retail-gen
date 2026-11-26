@@ -10,7 +10,7 @@ from retailgen.config import Config
 from retailgen.truth import build_truth
 from retailgen.truth.demand import DemandEngine
 
-ORIGINAL_DRAW = DemandEngine.draw
+ORIGINAL_DRAW_ALL = DemandEngine.draw_all
 
 
 class TruthDemandTest(unittest.TestCase):
@@ -20,14 +20,15 @@ class TruthDemandTest(unittest.TestCase):
         """Build the truth with the engine's draws recorded per channel."""
         cls.draws = {}
 
-        def spy(engine, channel):
-            """Call the real draw and keep its result."""
-            result = ORIGINAL_DRAW(engine, channel)
-            cls.draws[channel.name] = result
+        def spy(engine, channels):
+            """Call the real draw and keep each channel's (day, customer) arrays."""
+            result = ORIGINAL_DRAW_ALL(engine, channels)
+            for name, p in result.items():
+                cls.draws[name] = (p.day_index, p.customer_index)
             return result
 
         cls.cfg = Config(scale=0.01)
-        with mock.patch.object(DemandEngine, "draw", spy):
+        with mock.patch.object(DemandEngine, "draw_all", spy):
             cls.t = build_truth(cls.cfg, np.random.default_rng(cls.cfg.seed), log=lambda *a: None)
         cls.ids = cls.t.customers["customer_id"].to_numpy()
 

@@ -29,13 +29,12 @@ def store_channel(cfg):
 
 
 def generate_pos(cfg, rng, stores, store_events, customers, price_history, promos, fx,
-                 online_orders, online_lines, online_returns, engine, baskets):
-    """Store sales and returns, one row per line. Who buys and when comes from the demand engine; the
+                 online_orders, online_lines, online_returns, days, purchases, baskets):
+    """Store sales and returns, one row per line. Who buys and when comes from the demand engine's purchases; the
     customer shows in the data only when a member's card is scanned. Called by build_truth after online."""
-    # Draw the transactions from the demand engine
-    days = engine.days
+    # Take the drawn transactions
     open_m = store_open_matrix(stores, store_events, days)
-    day_idx, cust_idx = engine.draw(store_channel(cfg))
+    day_idx, cust_idx, credit = purchases.day_index, purchases.customer_index, purchases.campaign
 
     # Send each transaction to a store open that day, by floor area; days with no open store sell nothing
     sqft = stores["sqft"].to_numpy(float)
@@ -46,7 +45,7 @@ def generate_pos(cfg, rng, stores, store_events, customers, price_history, promo
         if w.sum() > 0:
             sidx[rows] = rng.choice(len(stores), size=len(rows), p=w / w.sum())
     keep = sidx >= 0
-    day_idx, cust_idx, sidx = day_idx[keep], cust_idx[keep], sidx[keep]
+    day_idx, cust_idx, sidx, credit = day_idx[keep], cust_idx[keep], sidx[keep], credit[keep]
     n = len(day_idx)
     tday = days.to_numpy().astype(NS)[day_idx]
     txn = pd.DataFrame({"store_id": stores["store_id"].to_numpy()[sidx],
@@ -54,6 +53,7 @@ def generate_pos(cfg, rng, stores, store_events, customers, price_history, promo
                         "register": rng.integers(1, 7, n),
                         "tender_type": rng.choice(["debit", "credit", "cash", "gift_card"], size=n, p=[.4, .45, .1, .05])})
     txn["cashier_id"] = [f"E{s}{k:02d}" for s, k in zip(txn["store_id"], rng.integers(1, 13, n))]
+    txn["campaign_credit"] = credit
 
     # A few transactions are staff buying with their discount, always scanned: staff signed up before that day
     staff = np.flatnonzero(customers["is_employee"].to_numpy())
@@ -62,6 +62,7 @@ def generate_pos(cfg, rng, stores, store_events, customers, price_history, promo
     if emp.any():
         cust_idx = cust_idx.copy()
         cust_idx[emp] = staff[(rng.random(int(emp.sum())) * hired[emp]).astype(int)]
+        txn.loc[emp, "campaign_credit"] = None
     txn["employee_sale"] = emp
 
     # The true customer, and the card scan that shows them: only members who had joined by then
@@ -188,8 +189,9 @@ def _returns(cfg, rng, sales, stores, store_events, online_orders, online_lines,
     r["is_return"] = True
     r["orig_txn_ref"] = None
     r["basket_src"] = -1
+    r["campaign_credit"] = None
     keep = ["store_id", "local_ts", "register", "tender_type", "cashier_id", "customer_id", "true_customer_id",
-            "employee_sale",
+            "campaign_credit", "employee_sale",
             "sku", "qty", "currency", "province", "unit_price", "promo_code", "line_discount", "line_tax",
             "orig_txn_ref", "orig_order_ref", "is_return", "basket_src", "orig_basket"]
     return r[keep]
