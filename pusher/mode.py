@@ -12,6 +12,7 @@ from pusher.errors import InputError
 HISTORY = "history"
 DAY = "day"
 _DAY_TEXT = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+USAGE = "usage: history | day YYYY-MM-DD | next --state FILE | unmark YYYY-MM-DD --state FILE"
 
 
 @dataclass(frozen=True)
@@ -35,7 +36,7 @@ class Mode:
                 return cls(DAY, date.fromisoformat(args[1]))
             except ValueError:
                 raise InputError(f"day is not a real date: {args[1]!r}") from None
-        raise InputError("usage: history | day YYYY-MM-DD")
+        raise InputError(USAGE)
 
     def relative_dir(self):
         """The folder under landing_staging that holds this delivery's files."""

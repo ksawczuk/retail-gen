@@ -30,9 +30,32 @@ Scenarios the generator handles on purpose, and why. One entry per case; code co
   that finished before changes (checked by hashing every file at scales 0.01 and 0.05 before and after). The seed list
   test is `tests/test_store_slots.py`.
 
+
 - **GEN-22 A planted problem is recorded only for rows that are written (Bug 579).** One emitter recorded a planted
   problem before later steps (a removed span of rows, rows delivered after the window) could drop the rows it was
   planted on, so the manifest could count a row that never reached the files. The record now comes after routing and
   keeps only the planted rows that are written. A written row that was not planted is not counted, so it cannot hide
   behind a matching total. No random draw moves, so the landing files are byte-identical; only that manifest entry
   changes. The test is `tests/test_inventory_manifest_written_rows.py`.
+
+### Pusher
+
+- **PSH-01 `next` records a day only after a clean push.** A day goes into the state file only when every file was
+  sent or skipped; with any failed file the run exits 1 and records nothing, so the next run pushes the same day again
+  (files already in the volume with the same size are skipped). A dry run records nothing either. The state file is
+  written to a temporary file, flushed and synced to disk, then renamed over the old one, so a crash or power cut
+  leaves the old or the new list, never an empty or partial one.
+- **PSH-02 Only the newest pushed day can be unmarked.** The pushed days must stay an unbroken run from the first
+  increment day, because the daily load in bronze refuses a day whose earlier days are not complete. Removing an older
+  day while a later one stays recorded would leave a gap that `next` fills out of order, so `unmark` refuses it and
+  names the day to unmark first. `unmark` changes only the state file; removing the day's files from the volume is a
+  separate runbook step.
+- **PSH-03 The increment days come from the data, and the state path has no default.** `next` reads the days from the
+  `increments/day=` folders, so the feed ends wherever the generated data ends with no date in the code. The state
+  path must be given: a default would let a run whose state folder was not mounted start again at the first day. A
+  missing state folder, a state inside the landing folder, or a file that is not an unbroken run of increment days stops
+  the run with exit 2.
+- **PSH-04 One run at a time.** `next` and `unmark` hold a lock file beside the state while they run, created
+  exclusively, so the daily timer and a manual run cannot both change the state. A second run exits 2 and names the lock.
+  A lock left by a killed run is removed by hand, once no pusher is running; the run does not guess whether a lock is
+  stale.
