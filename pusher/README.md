@@ -15,7 +15,7 @@ Standard library only.
 | Modes | `history`: every file under `landing_staging/history/`. `day YYYY-MM-DD`: every file under `landing_staging/increments/day=<date>/`. `next` and `unmark`: the daily feed, below. The date is always given or kept in the state file; there is no "yesterday" |
 | Input | `landing_staging/` mounted read-only at `/data/landing_staging`. `next` and `unmark` also need the state file's folder, read-write (below) |
 | Environment | `DATABRICKS_HOST` (an `https://` host, nothing after it), `DATABRICKS_TOKEN`. Optional: `PUSH_DRY_RUN=1` lists the files without sending and needs neither of the first two; `PUSH_LANDING_ROOT` overrides the mount path (for local runs); `HTTPS_PROXY` (below). `unmark` needs only `PUSH_LANDING_ROOT` (or the mount) |
-| Exit codes | `0` done; `1` some files failed (the others were still sent); `2` bad configuration or input. Every line and its exit code: [Output lines](#output-lines) |
+| Exit codes | `0` done; `1` some files failed (the others were still sent); `2` bad configuration or input; an unexpected error (a Python traceback on stderr) also exits `1`, with nothing recorded. Every line and its exit code: [Output lines](#output-lines) |
 | Log | stdout only; [Output lines](#output-lines). The token and response bodies are never logged |
 | Run model | one-shot: the container does one run and exits. No ports. `history` and `day` write nothing (a read-only root filesystem works); `next` and `unmark` write only the state file and its lock |
 | Network | outbound HTTPS to the Databricks host only: direct, or through the forward proxy named by `HTTPS_PROXY` |

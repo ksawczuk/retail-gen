@@ -89,7 +89,7 @@ class PushState:
         over the old one."""
         temporary = self._path.with_name(self._path.name + ".tmp")
         # Write the new list and force it to disk
-        with open(temporary, "w", encoding="utf-8") as handle:
+        with open(temporary, "w", encoding="utf-8", newline="\n") as handle:
             handle.write("".join(f"{day.isoformat()}\n" for day in days))
             handle.flush()
             os.fsync(handle.fileno())

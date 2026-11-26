@@ -44,6 +44,14 @@ class PushStateTest(unittest.TestCase):
         self.assertEqual(PushState(self.path, self.landing).days(DAYS), DAYS[:2])
         self.assertEqual(self.path.read_text(encoding="utf-8"), "2026-10-01\n2026-10-02\n")
 
+    def test_state_file_has_lf_line_endings_on_every_platform(self):
+        state = self._state()
+        state.record(DAYS[0], DAYS)
+        state.record(DAYS[1], DAYS)
+        data = self.path.read_bytes()
+        self.assertEqual(data, b"2026-10-01\n2026-10-02\n")
+        self.assertNotIn(b"\r", data)
+
     def test_write_leaves_no_temporary_file(self):
         self._state().record(DAYS[0], DAYS)
         self.assertEqual(sorted(p.name for p in self.path.parent.iterdir()), ["pushed_days.txt"])
