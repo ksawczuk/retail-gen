@@ -146,7 +146,9 @@ def generate_online(cfg, rng, customers, addresses, price_history, promos, fx, d
 def _code_redemptions(rng, open_, buyer, audience):
     """Orders that redeem a campaign's code: the treated use it; a leaking code also reaches the holdout and
     customers outside the audience, as a set share of all redemptions."""
-    treated = np.isin(buyer, list(audience.treated))
+    buyers = pd.Series(buyer)
+    treated = buyers.isin(audience.treated).to_numpy()
+    in_holdout = buyers.isin(audience.holdout).to_numpy()
     hit = open_ & treated & (rng.random(len(buyer)) < CODE_SHARE)
     if not audience.leaks:
         return hit
@@ -154,8 +156,8 @@ def _code_redemptions(rng, open_, buyer, audience):
     # Leaks: add holdout and outside redemptions as their shares of the total
     n_treated = int(hit.sum())
     total = n_treated / (1 - HOLDOUT_REDEMPTION_SHARE - OUTSIDE_REDEMPTION_SHARE)
-    holdout = np.flatnonzero(open_ & np.isin(buyer, list(audience.holdout)))
-    outside = np.flatnonzero(open_ & ~treated & ~np.isin(buyer, list(audience.holdout)))
+    holdout = np.flatnonzero(open_ & in_holdout)
+    outside = np.flatnonzero(open_ & ~treated & ~in_holdout)
     for pool, share in ((holdout, HOLDOUT_REDEMPTION_SHARE), (outside, OUTSIDE_REDEMPTION_SHARE)):
         k = min(len(pool), int(round(total * share)))
         if k:

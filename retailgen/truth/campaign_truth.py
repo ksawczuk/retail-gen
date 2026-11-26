@@ -80,7 +80,7 @@ def truth_table(rng, specs, ctx, signup, purchases, days, customer_ids, orders, 
     day_idx = np.concatenate([p.day_index for p in purchases.values()])
     cust = np.concatenate([p.customer_index for p in purchases.values()])
     credit = np.concatenate([p.campaign for p in purchases.values()])
-    buyer = np.where(cust >= 0, customer_ids[np.maximum(cust, 0)], None)
+    buyer = pd.Series(np.where(cust >= 0, customer_ids[np.maximum(cust, 0)], None))
     send_day = {s.campaign_id: [int(days.get_indexer([pd.Timestamp(x.day)])[0]) for x in s.sends] for s in specs}
 
     rows = []
@@ -94,13 +94,12 @@ def truth_table(rng, specs, ctx, signup, purchases, days, customer_ids, orders, 
         # Lift campaigns: purchases by the treated in the window, the credited ones, and the realized lift
         if s.kind in LIFT_KINDS:
             incremental = int((credit == s.campaign_id).sum())
-            treated = np.array(sorted(g.get("treated", set())), dtype=object)
+            by_treated = buyer.isin(g.get("treated", set())).to_numpy()
             if s.kind == "canvas" or s.kind == "newsletter":
-                in_window = credit == s.campaign_id
                 window_buys = incremental
             else:
                 lo, hi = send_day[s.campaign_id][0], send_day[s.campaign_id][-1] + s.window_days
-                in_window = (day_idx >= lo) & (day_idx < hi) & np.isin(buyer, treated)
+                in_window = (day_idx >= lo) & (day_idx < hi) & by_treated
                 window_buys = int(in_window.sum())
             row["treated_window_purchases"] = window_buys
             row["incremental_purchases"] = incremental
@@ -108,7 +107,7 @@ def truth_table(rng, specs, ctx, signup, purchases, days, customer_ids, orders, 
             row["realized_lift"] = incremental / base if base > 0 else np.nan
             if s.pullback:
                 lo = send_day[s.campaign_id][0] + s.window_days
-                after = (day_idx >= lo) & (day_idx < lo + s.pullback_days) & np.isin(buyer, treated)
+                after = (day_idx >= lo) & (day_idx < lo + s.pullback_days) & by_treated
                 row["pullback_purchases_lost"] = int(round(after.sum() * s.pullback / (1 - s.pullback)))
         elif s.kind == "winback":
             row["incremental_comebacks"] = ctx.reactivations.get(s.campaign_id, 0)

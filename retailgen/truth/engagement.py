@@ -13,6 +13,8 @@ OPEN = 0.38
 MACHINE_OPEN_SHARE = 0.40
 CLICK = 0.024
 SEND_HOUR_UTC = 17
+COLUMNS = ["campaign_id", "customer_id", "event_type", "event_ts", "machine_open", "bounce_type",
+           "after_unsubscribe", "no_consent"]
 
 
 def engagement_events(rng, days, customer_ids, sends, signup_sends):
@@ -30,18 +32,17 @@ def engagement_events(rng, days, customer_ids, sends, signup_sends):
         n = len(ids)
         none = np.zeros(n, bool)
         parts.append(_events(rng, day, campaign_id, np.asarray(ids), np.ones(n), none, none, none))
-    if not parts:
-        return pd.DataFrame(columns=["campaign_id", "customer_id", "event_type", "event_ts", "machine_open",
-                                     "bounce_type", "after_unsubscribe", "no_consent"])
-    out = pd.concat(parts, ignore_index=True)
+    blocks = [b for part in parts if part for b in part]
+    out = pd.DataFrame({c: np.concatenate([b[c] for b in blocks]) if blocks else np.array([]) for c in COLUMNS})
+    out["event_ts"] = out["event_ts"].astype(NS)
     return out.sort_values(["event_ts", "campaign_id"], kind="stable").reset_index(drop=True)
 
 
 def _events(rng, day, campaign_id, ids, fatigue, after_unsubscribe, no_consent, unsubscribed):
-    """The events of one send to `ids`."""
+    """The events of one send to `ids`, as a list of column blocks."""
     n = len(ids)
     if n == 0:
-        return None
+        return []
     sent = day + np.timedelta64(SEND_HOUR_UTC, "h") + (rng.random(n) * 3600).astype("timedelta64[s]")
     frames = [_frame(campaign_id, ids, "send", sent, after_unsubscribe, no_consent)]
 
@@ -53,7 +54,7 @@ def _events(rng, day, campaign_id, ids, fatigue, after_unsubscribe, no_consent, 
     bounced = ~delivered
     bounce = _frame(campaign_id, ids[bounced], "bounce", arrive[bounced], after_unsubscribe[bounced],
                     no_consent[bounced])
-    bounce["bounce_type"] = np.where(rng.random(int(bounced.sum())) < HARD_BOUNCE_SHARE, "hard", "soft")
+    bounce["bounce_type"] = np.where(rng.random(int(bounced.sum())) < HARD_BOUNCE_SHARE, "hard", "soft").astype(object)
     frames.append(bounce)
 
     # Opens: some by a mail client's machine, the rest by people, who open less when over-sent
@@ -63,7 +64,7 @@ def _events(rng, day, campaign_id, ids, fatigue, after_unsubscribe, no_consent, 
                                 rng.lognormal(np.log(3 * 3600), 1.2, n)).astype("timedelta64[s]")
     opened = machine | human
     opens = _frame(campaign_id, ids[opened], "open", open_at[opened], after_unsubscribe[opened], no_consent[opened])
-    opens["machine_open"] = machine[opened]
+    opens["machine_open"] = machine[opened].copy()
     frames.append(opens)
 
     # Clicks come from people who opened
@@ -76,11 +77,13 @@ def _events(rng, day, campaign_id, ids, fatigue, after_unsubscribe, no_consent, 
     unsub_at = arrive + (rng.random(n) * 86400).astype("timedelta64[s]")
     frames.append(_frame(campaign_id, ids[unsubscribed], "unsubscribe", unsub_at[unsubscribed],
                          after_unsubscribe[unsubscribed], no_consent[unsubscribed]))
-    return pd.concat(frames, ignore_index=True)
+    return frames
 
 
 def _frame(campaign_id, ids, event_type, when, after_unsubscribe, no_consent):
-    """A block of events of one type."""
-    return pd.DataFrame({"campaign_id": campaign_id, "customer_id": ids, "event_type": event_type,
-                         "event_ts": np.asarray(when).astype(NS), "machine_open": False, "bounce_type": None,
-                         "after_unsubscribe": after_unsubscribe, "no_consent": no_consent})
+    """A block of events of one type, as columns of equal length."""
+    n = len(ids)
+    return {"campaign_id": np.full(n, campaign_id, dtype=object), "customer_id": np.asarray(ids, dtype=object),
+            "event_type": np.full(n, event_type, dtype=object), "event_ts": np.asarray(when).astype(NS),
+            "machine_open": np.zeros(n, bool), "bounce_type": np.full(n, None, dtype=object),
+            "after_unsubscribe": np.asarray(after_unsubscribe, bool), "no_consent": np.asarray(no_consent, bool)}
