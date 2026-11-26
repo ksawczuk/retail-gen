@@ -100,13 +100,28 @@ def emit_web(cfg, rng, t, out, man):
     man.record("web.truncated_lines", n_trunc)
 
 
+def _stock_keys(df) -> pd.Series:
+    """The `store|sku|date` key of each inventory row. Called by emit_inventory for the planted
+    negative rows and for the rows that are written."""
+    return df["store_id"].astype(str) + "|" + df["sku"] + "|" + df["snapshot_date"].dt.strftime("%Y-%m-%d")
+
+
+def _record_written_negatives(man, planted_keys, written_frames):
+    """Record only the planted negative rows that reach the files, in planting order.
+    Called by emit_inventory after the gap and routing have removed rows."""
+    # Collect the keys of every negative row that is written
+    written = pd.concat([_stock_keys(f[f["on_hand"] < 0]) for f in written_frames], ignore_index=True)
+
+    # Keep the planted keys that were written
+    kept = planted_keys[planted_keys.isin(set(written))]
+    man.record("inventory.negative_on_hand", len(kept), keys=kept)  # 579
+
+
 def emit_inventory(cfg, rng, t, out, man):
     inv = t.inventory.copy()
     neg = pick_rows(rng, len(inv), cfg.count(0.001 * len(inv), 2))
     inv.loc[neg, "on_hand"] = -rng.integers(1, 20, len(neg))
-    man.record("inventory.negative_on_hand", len(neg),
-               keys=inv.loc[neg, "store_id"].astype(str) + "|" + inv.loc[neg, "sku"] + "|" +
-               inv.loc[neg, "snapshot_date"].dt.strftime("%Y-%m-%d"))
+    planted_keys = _stock_keys(inv.loc[neg])  # 579
     hist_mask = inv["snapshot_date"] <= cfg.history_end
     weeks = sorted(inv.loc[hist_mask, "snapshot_date"].unique())
     stores = sorted(inv["store_id"].unique())
@@ -132,6 +147,7 @@ def emit_inventory(cfg, rng, t, out, man):
         return d.reset_index(drop=True)
 
     hist, days = route(cfg, inv, deliver)
+    _record_written_negatives(man, planted_keys, [hist, *days.values()])
     for m, g in by_month(hist, hist["snapshot_date"]).items():
         out.parquet(fmt(g), None, "inventory", "snapshots", f"inventory_{m}.parquet")
     for day, g in days.items():
