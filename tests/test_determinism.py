@@ -38,6 +38,10 @@ class DeterminismTest(unittest.TestCase):
             # Compare the file lists and the bytes of every file
             a, b = fingerprint(first / "landing_staging"), fingerprint(second / "landing_staging")
             self.assertGreater(len(a), 0)
+
+            # The increments run to 2026-12-31 and no later
+            days = sorted(p.name for p in (first / "landing_staging" / "increments").iterdir())
+            self.assertEqual((len(days), days[-1]), (92, "day=2026-12-31"))
             self.assertEqual(sorted(a), sorted(b))
             self.assertEqual([k for k in a if a[k] != b[k]], [])
 
