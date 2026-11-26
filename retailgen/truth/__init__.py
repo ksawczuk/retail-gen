@@ -13,6 +13,10 @@ from .online import generate_online
 from .pos import generate_pos
 from .web import generate_clickstream
 from .inventory import generate_inventory
+from .baskets import BasketBuilder
+from .demand import DemandEngine
+from .lifecycle import CustomerLifecycle
+from .seasonality import Seasonality
 
 
 @dataclass
@@ -48,19 +52,21 @@ def build_truth(cfg, rng, log=print) -> Truth:
     promotions = generate_promotions(cfg)
     log("truth: customers")
     customers, addresses = generate_customers(cfg, rng)
+    log("truth: lifecycle and demand")
+    engine, baskets = build_demand(cfg, rng, customers, products, categories)
     log("truth: online orders")
     orders, lines, payments, shipments, returns = generate_online(
-        cfg, rng, customers, addresses, products, price_history, promotions, fx)
+        cfg, rng, customers, addresses, price_history, promotions, fx, engine, baskets)
     log("truth: point of sale")
-    pos = generate_pos(cfg, rng, stores, store_events, customers, products, price_history, promotions,
-                       fx, orders, lines, returns)
+    pos = generate_pos(cfg, rng, stores, store_events, customers, price_history, promotions,
+                       fx, orders, lines, returns, engine, baskets)
     log("truth: CRM changes")
     last = pd.concat([orders[["customer_id", "order_ts"]].rename(columns={"order_ts": "ts"}),
                       pos[["customer_id", "utc_ts"]].rename(columns={"utc_ts": "ts"})]).dropna()
     last_activity = last.groupby("customer_id")["ts"].max()
     cust_ev, addr_ev, deleted = generate_crm_changes(cfg, rng, customers, addresses, last_activity)
     log("truth: clickstream")
-    clicks = generate_clickstream(cfg, rng, orders, lines, customers, products, price_history)
+    clicks = generate_clickstream(cfg, rng, orders, lines, customers, products, price_history, engine)
     log("truth: inventory")
     inventory = generate_inventory(cfg, rng, stores, store_events, products)
     t = Truth(fx, stores, store_events, categories, suppliers, products, price_history, promotions,
@@ -68,6 +74,18 @@ def build_truth(cfg, rng, log=print) -> Truth:
               returns, pos, clicks, inventory)
     check_truth(t)
     return t
+
+
+def build_demand(cfg, rng, customers, products, categories, modifiers=()):
+    """Wire the lifecycle, seasonality, demand engine and basket builder for the whole window.
+    Called by build_truth after the customers; campaigns (Story 771) arrive as modifiers."""
+    days = pd.date_range(cfg.history_start, cfg.increment_end, freq="D")
+    category_names = categories.loc[categories["level"] == 2, "category_name"].tolist()
+    seasons = Seasonality(days, category_names)
+    lifecycle = CustomerLifecycle.build(rng, customers, len(category_names))
+    engine = DemandEngine(rng, days, customers["created_at"], customers["activity"], lifecycle, seasons, modifiers)
+    baskets = BasketBuilder(products, seasons, lifecycle.preferences, lifecycle.basket_mult)
+    return engine, baskets
 
 
 def check_truth(t: Truth):

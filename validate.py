@@ -144,7 +144,7 @@ def main(out):
     check("OMS exact duplicate history orders = manifest", d == cnt("oms.exact_duplicate_orders"),
           f"{d} vs {cnt('oms.exact_duplicate_orders')}")
     all_orders = pd.concat(read_parquet(p, columns=["order_id", "order_ts"]) for p in files(stage, "**/oms/orders/*.parquet"))
-    fut = all_orders.loc[all_orders["order_ts"] > pd.Timestamp("2026-11-01", tz="UTC"), "order_id"].nunique()
+    fut = all_orders.loc[all_orders["order_ts"] > pd.Timestamp("2027-01-01", tz="UTC"), "order_id"].nunique()
     check("OMS future-dated orders = manifest", fut == cnt("oms.future_dated_orders"), f"{fut} vs {cnt('oms.future_dated_orders')}")
     lines = pd.concat(read_parquet(p, columns=["order_id", "sku"]) for p in files(stage, "**/oms/order_lines/*.parquet"))
     orph = int((~lines["order_id"].isin(set(all_orders["order_id"]))).sum())

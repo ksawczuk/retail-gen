@@ -3,33 +3,42 @@ import numpy as np
 import pandas as pd
 
 from .. import reference as ref
-from ..util import seasonality, bounded_weighted_pick, seconds_in_day
+from ..util import seconds_in_day
 from .masterdata import price_lookup, fx_on
 from .customers import ship_to
+from .demand import Channel
 
 NS = "datetime64[ns]"
 ONLINE_HOURS = [1, .6, .4, .3, .3, .5, 1, 1.5, 2, 2.5, 3, 3, 3, 3, 3, 3.5, 4, 4.5, 5, 5.5, 5, 4, 3, 2]
+GUEST_SHARE = 0.12
+ONLINE_EXTRA_LINES = 1.2
+ONLINE_QTY_RATE = 0.28
+
+
+def online_channel(cfg):
+    """The online channel: the configured orders per day, 12% of them guests."""
+    return Channel("online", cfg.web_orders_per_day, GUEST_SHARE)
 
 
 def _hours(rng, n, lo, hi):
     return pd.to_timedelta(rng.uniform(lo, hi, n), unit="h")
 
 
-def generate_online(cfg, rng, customers, addresses, products, price_history, promos, fx):
-    days = pd.date_range(cfg.history_start, cfg.increment_end, freq="D")
-    counts = rng.poisson(cfg.web_orders_per_day * seasonality(days))
-    n = int(counts.sum())
-    day = np.repeat(days.to_numpy().astype(NS), counts)
-    ts = np.sort(day + seconds_in_day(rng, n, ONLINE_HOURS).astype("timedelta64[s]")).astype(NS)
+def generate_online(cfg, rng, customers, addresses, price_history, promos, fx, engine, baskets):
+    """Online orders with their lines, payments, shipments and returns. Who orders and when comes from the
+    demand engine; the lines from the basket builder. Called by build_truth after the customers."""
+    # Draw the orders from the demand engine and give each a time of day, in time order
+    day_idx, cust_idx = engine.draw(online_channel(cfg))
+    n = len(day_idx)
+    day = engine.days.to_numpy().astype(NS)[day_idx]
+    ts = (day + seconds_in_day(rng, n, ONLINE_HOURS).astype("timedelta64[s]")).astype(NS)
+    order = np.argsort(ts, kind="stable")
+    ts, day_idx, cust_idx = ts[order], day_idx[order], cust_idx[order]
     orders = pd.DataFrame({"order_id": [f"ORD-{100000001 + i}" for i in range(n)], "order_ts": ts})
 
-    # Who ordered: an existing customer weighted by activity, or a guest.
-    cust = customers.sort_values("created_at").reset_index(drop=True)
-    cumw = np.cumsum(cust["activity"].to_numpy())
-    ub = np.searchsorted(cust["created_at"].to_numpy(), ts, side="right")
-    guest = (rng.random(n) < 0.12) | (ub == 0)
-    ci = bounded_weighted_pick(rng, cumw, np.maximum(ub, 1))
-    orders["customer_id"] = np.where(guest, None, cust["customer_id"].to_numpy()[ci])
+    # Who ordered: the engine's customer, or a guest
+    guest = cust_idx < 0
+    orders["customer_id"] = np.where(guest, None, customers["customer_id"].to_numpy()[np.maximum(cust_idx, 0)])
     orders["guest_email"] = np.where(guest, [f"guest{rng.integers(10**6, 10**7)}@{ref.EMAIL_DOMAINS[rng.integers(5)]}"
                                              for _ in range(n)], None)
 
@@ -49,17 +58,12 @@ def generate_online(cfg, rng, customers, addresses, products, price_history, pro
     orders["currency"] = np.where(orders["ship_country"] == "US", "USD", "CAD")
     orders["channel"] = rng.choice(["web", "app"], size=n, p=[0.65, 0.35])
 
-    # Lines: popularity-weighted SKUs that had launched by the order time.
-    n_lines = 1 + rng.poisson(1.2, n)
-    oi = np.repeat(np.arange(n), n_lines)
-    prods = products[~products["pim_excluded"]].sort_values("launched_at").reset_index(drop=True)
-    pcum = np.cumsum(prods["popularity"].to_numpy())
-    pub = np.maximum(np.searchsorted(prods["launched_at"].to_numpy(), ts[oi], side="right"), 1)
-    lines = pd.DataFrame({"oi": oi, "sku": prods["sku"].to_numpy()[bounded_weighted_pick(rng, pcum, pub)]})
-    lines = lines.drop_duplicates(["oi", "sku"]).reset_index(drop=True)
+    # Lines: the customer's categories in season, SKUs launched by the order time
+    lines = baskets.lines(rng, ts, day_idx, cust_idx, extra_lines=ONLINE_EXTRA_LINES, qty_rate=ONLINE_QTY_RATE,
+                          qty_max=4, local_items=False).rename(columns={"row": "oi"})
     lines["order_id"] = orders["order_id"].to_numpy()[lines["oi"]]
     lines["line_no"] = lines.groupby("oi").cumcount() + 1
-    lines["qty"] = rng.choice([1, 2, 3, 4], size=len(lines), p=[0.8, 0.14, 0.04, 0.02])
+    lines = lines[["oi", "sku", "order_id", "line_no", "qty"]]
     lts = ts[lines["oi"].to_numpy()]
     price_cad = price_lookup(price_history, lines["sku"].to_numpy(), lts)
     usd = (orders["currency"].to_numpy()[lines["oi"]] == "USD")

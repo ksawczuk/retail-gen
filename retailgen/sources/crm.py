@@ -91,6 +91,9 @@ def emit(cfg, rng, t, out, man):
     he = cfg.history_end + pd.Timedelta(days=1)
     # ---------------- history: full extract at cut-over
     c = t.customers[t.customers["created_at"] < he].reset_index(drop=True)
+    # A member who joins after the cut-over has no loyalty number in the extract yet
+    later = (c["loyalty_join_at"] >= he).to_numpy()
+    c.loc[later, ["loyalty_number", "loyalty_tier"]] = None
     cf = _customer_frame(cfg, rng, c, man, "customers")
     accented = cf["FIRST_NM"].str.cat(cf["LAST_NM"]).map(lambda s: any(ord(ch) > 127 for ch in s))
     mj = accented & (rng.random(len(cf)) < 0.3)

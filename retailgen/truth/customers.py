@@ -4,6 +4,7 @@ import pandas as pd
 
 from .. import reference as ref
 from ..util import ascii_fold
+from .lifecycle import MEMBER_SHARE, loyalty_join_dates, tiers_by_activity
 
 NS = "datetime64[ns]"
 POSTAL_LETTERS = list("ABCEGHJKLMNPRSTVWXYZ")
@@ -103,14 +104,17 @@ def generate_customers(cfg, rng):
     cust = cust.sort_values("created_at").reset_index(drop=True)
     cust.insert(0, "customer_id", [f"C{1000001 + i}" for i in range(len(cust))])
 
+    # Loyalty: membership by the end of the window, a join date per member, and a tier from activity
     m = len(cust)
-    in_loyalty = (rng.random(m) < 0.65) | cust["is_employee"].to_numpy()
+    is_emp_all = cust["is_employee"].to_numpy()
+    in_loyalty = (rng.random(m) < MEMBER_SHARE) | is_emp_all
     nums = rng.permutation(np.unique(rng.integers(100_000_000, 999_999_999, size=int(m * 1.2))))[:m]
     cust["loyalty_number"] = np.where(in_loyalty, [f"L{x}" for x in nums], None)
-    tier = rng.choice(["Bronze", "Silver", "Gold"], size=m, p=[0.6, 0.28, 0.12])
-    cust["loyalty_tier"] = np.where(in_loyalty, tier, None)
     cust["marketing_opt_in"] = rng.random(m) < 0.55
     cust["activity"] = rng.lognormal(0, 1.0, m)
+    cust["loyalty_tier"] = tiers_by_activity(cust["activity"], in_loyalty)
+    joined = loyalty_join_dates(rng, cust["created_at"], in_loyalty, cfg.increment_end)
+    cust["loyalty_join_at"] = np.where(is_emp_all, cust["created_at"].to_numpy().astype(NS), joined).astype(NS)
     cust["province"] = [ref.CITIES[i][1] for i in cust["city_idx"]]
     cust["country"] = [ref.CITIES[i][2] for i in cust["city_idx"]]
 
@@ -159,19 +163,35 @@ def generate_crm_changes(cfg, rng, customers, addresses, last_activity: pd.Serie
     and deletes. Returns (customer_events, address_events, deleted_ids); every event carries a
     full row image and its change timestamp."""
     state = customers.set_index("customer_id").copy()
+    # Loyalty as the CRM knows it at the cut-over: members who join later, and not at signup, wait for their join
+    final_loyalty = state[["loyalty_number", "loyalty_tier"]].copy()
+    cutover = np.datetime64(cfg.history_end + pd.Timedelta(days=1), "ns")
+    join_at = state["loyalty_join_at"].to_numpy()
+    pending = (join_at >= cutover) & (join_at > state["created_at"].to_numpy().astype(NS))
+    state.loc[pending, ["loyalty_number", "loyalty_tier"]] = None
+    joins = state.index[pending]
     cust_ev, addr_ev, deleted = [], [], set()
     next_addr = int(addresses["address_id"].str[1:].astype(int).max()) + 1
     addr_state = addresses.set_index("address_id").copy()
-    cols = [c for c in customers.columns if c != "customer_id"]
 
     for day in cfg.increment_days:
         day_end = day + pd.Timedelta(days=1)
         new = customers[(customers["created_at"] >= day) & (customers["created_at"] < day_end)]
         for r in new.itertuples(index=False):
             cust_ev.append({"op": "I", "change_ts": r.created_at, "customer_id": r.customer_id,
-                            **{c: getattr(r, c) for c in cols}})
+                            **state.loc[r.customer_id].to_dict()})
             for a in addresses[addresses["customer_id"] == r.customer_id].itertuples(index=False):
                 addr_ev.append({"op": "I", "change_ts": r.created_at, **a._asdict()})
+
+        # Loyalty joins: the member's number and tier appear in the CRM on the day they join
+        joined_today = joins[(state.loc[joins, "loyalty_join_at"] >= day).to_numpy()
+                             & (state.loc[joins, "loyalty_join_at"] < day_end).to_numpy()]
+        for cid in joined_today:
+            if cid in deleted:
+                continue
+            state.loc[cid, ["loyalty_number", "loyalty_tier"]] = final_loyalty.loc[cid].to_numpy()
+            cust_ev.append({"op": "U", "change_ts": state.loc[cid, "loyalty_join_at"], "customer_id": cid,
+                            **state.loc[cid].to_dict()})
 
         existing = state.index[(state["created_at"] < day) & ~state.index.isin(list(deleted))]
         if len(existing) == 0:
@@ -191,12 +211,11 @@ def generate_crm_changes(cfg, rng, customers, addresses, last_activity: pd.Serie
             elif kind == "opt_in":
                 row["marketing_opt_in"] = not bool(row["marketing_opt_in"])
             elif kind == "tier":
+                # Only a member's tier moves
                 if row["loyalty_number"] is None or pd.isna(row["loyalty_number"]):
-                    row["loyalty_number"] = f"L{rng.integers(100_000_000, 999_999_999)}"
-                    row["loyalty_tier"] = "Bronze"
-                else:
-                    row["loyalty_tier"] = {"Bronze": "Silver", "Silver": "Gold", "Gold": "Silver"}.get(
-                        row["loyalty_tier"], "Bronze")
+                    continue
+                row["loyalty_tier"] = {"Bronze": "Silver", "Silver": "Gold", "Gold": "Silver"}.get(
+                    row["loyalty_tier"], "Bronze")
             else:
                 row["last_name"] = ref.LAST_NAMES[rng.integers(len(ref.LAST_NAMES))]
             state.loc[cid] = row

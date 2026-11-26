@@ -5,6 +5,8 @@ import pandas as pd
 from .. import reference as ref
 from ..util import bounded_weighted_pick, seconds_in_day
 from .masterdata import price_lookup
+from .demand import NONE
+from .online import online_channel
 
 NS = "datetime64[ns]"
 HOURS = [1, .6, .4, .3, .3, .5, 1, 1.5, 2, 2.5, 3, 3, 3, 3, 3, 3.5, 4, 4.5, 5, 5.5, 5, 4, 3, 2]
@@ -16,7 +18,7 @@ def _hex(rng, n, nbytes):
     return [h[i * 2 * nbytes:(i + 1) * 2 * nbytes] for i in range(n)]
 
 
-def generate_clickstream(cfg, rng, orders, lines, customers, products, price_history):
+def generate_clickstream(cfg, rng, orders, lines, customers, products, price_history, engine):
     """Events from clickstream_start onward. 65% of online orders were tracked (consent); the
     rest of the traffic is browsing sessions that never bought."""
     o = orders[(orders["order_ts"] >= cfg.clickstream_start)]
@@ -55,12 +57,15 @@ def generate_clickstream(cfg, rng, orders, lines, customers, products, price_his
     nday = np.repeat(days.to_numpy().astype(NS), nc)
     m = len(nday)
     start = (nday + seconds_in_day(rng, m, HOURS).astype("timedelta64[s]")).astype(NS)
-    cust = customers.sort_values("created_at").reset_index(drop=True)
-    ub = np.searchsorted(cust["created_at"].to_numpy(), start, side="right")
-    logged = (rng.random(m) < 0.2) & (ub > 0)
-    pick = bounded_weighted_pick(rng, np.cumsum(cust["activity"].to_numpy()), np.maximum(ub, 1))
+    # Signed-in browsers are customers the demand engine would pick that day
+    signed_in = rng.random(m) < 0.2
+    day_index = ((start.astype("datetime64[D]") - engine.days[0].to_datetime64().astype("datetime64[D]"))
+                 // np.timedelta64(1, "D")).astype(int)
+    browser = np.full(m, NONE)
+    browser[signed_in] = engine.pick(online_channel(cfg), day_index[signed_in])
+    ids = customers["customer_id"].to_numpy()
     sess_nc = pd.DataFrame({"session_id": _hex(rng, m, 8), "order_id": None,
-                            "customer_id": np.where(logged, cust["customer_id"].to_numpy()[pick], None),
+                            "customer_id": np.where(browser >= 0, ids[np.maximum(browser, 0)], None),
                             "start": start, "channel": rng.choice(["web", "app"], size=m, p=[.65, .35])})
     ev.append(pd.DataFrame({"session_id": sess_nc["session_id"], "event_type": "page_view",
                             "event_ts": sess_nc["start"], "page": "/", "sku": None, "order_id": None}))
