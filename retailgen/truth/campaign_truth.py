@@ -128,7 +128,7 @@ def truth_table(rng, specs, ctx, signup, purchases, days, customer_ids, orders, 
         rows.append(row)
     table = pd.DataFrame(rows)
 
-    # Flights that bring no one are priced like the working ones, so every flight loses money
+    # Price the flights that add no customers like the others
     flights = table["kind"] == "prospects"
     paid = table.loc[flights & (table["incremental_customers"] > 0), "spend"]
     typical = float(paid.mean()) if len(paid) else 5_000.0
@@ -197,7 +197,7 @@ def _code_redemptions_by_group(specs, groups, orders):
 
 
 def _flight_economics(rng, spec, signup, orders, pos_lines):
-    """A flight's pulled-forward and new customers, what the new ones spent, and a spend above what they are worth."""
+    """A flight's pulled-forward and new customers, what the new ones spent, and its spend."""
     added = signup.added.get(spec.campaign_id, [])
     value = 0.0
     if added:

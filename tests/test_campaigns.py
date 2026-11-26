@@ -42,7 +42,7 @@ class CalendarTest(unittest.TestCase):
         reminders = {s.parent for s in specs if s.kind == "reminder"}
         self.assertEqual(reminders, {s.campaign_id for s in broadcast if s.holdout == "contaminated"})
 
-    def test_one_winback_is_mistargeted_and_three_flights_add_customers(self):
+    def test_winback_lapse_settings_and_flights_that_add_customers(self):
         specs = calendar()
         self.assertEqual(sorted(s.lapsed_days for s in specs if s.kind == "winback"), [45] + [180] * 7)
         self.assertEqual([s.sends[0].lift for s in specs if s.lapsed_days == 45], [0.0])
@@ -115,9 +115,9 @@ class AnswerKeyTest(unittest.TestCase):
     def test_every_prospects_customer_exists(self):
         self.assertTrue(set(self.t.prospect_customers["customer_id"]) <= set(self.t.customers["customer_id"]))
 
-    def test_some_flights_add_customers_and_every_flight_loses_money(self):
-        """Decision 2: at least one flight adds real customers, and spend per incremental customer is above
-        their value for every flight (no incremental customers counts as infinite cost)."""
+    def test_flight_economics_follow_decision_2(self):
+        """Each flight's spend, incremental customers and value per customer relate as decision 2 sets them
+        (no incremental customers counts as infinite cost)."""
         flights = self.t.campaign_truth[self.t.campaign_truth["kind"] == "prospects"]
         self.assertGreater(flights["incremental_customers"].max(), 0)
         for f in flights.itertuples(index=False):
@@ -147,7 +147,7 @@ class AnswerKeyTest(unittest.TestCase):
         self.assertTrue(credited <= known)
         self.assertGreater(len(credited), 0)
 
-    def test_engagement_flaws_are_present_and_bounded(self):
+    def test_engagement_flags_are_bounded(self):
         ev = self.t.engagement_events
         sends = ev[ev["event_type"] == "send"]
         self.assertLessEqual(int(sends["after_unsubscribe"].sum()), Config(scale=0.01).count(POST_UNSUBSCRIBE_SENDS))
@@ -156,8 +156,8 @@ class AnswerKeyTest(unittest.TestCase):
         opens = ev[ev["event_type"] == "open"]
         self.assertAlmostEqual(opens["machine_open"].mean(), 0.4, delta=0.1)
 
-    def test_a_code_that_does_not_leak_is_only_used_by_its_treated(self):
-        """BOXING25 does not leak: every order using it comes from a treated customer of CMP-10."""
+    def test_a_code_without_wider_use_stays_with_its_treated(self):
+        """Every order using BOXING25 comes from a treated customer of CMP-10."""
         a = self.t.campaign_assignment
         treated = set(a[(a["campaign_id"] == "CMP-10") & (a["group"] == "treated")]["customer_id"])
         users = self.t.orders.loc[self.t.orders["coupon_code"] == "BOXING25", "customer_id"]
