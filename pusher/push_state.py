@@ -88,7 +88,7 @@ class PushState:
         """Replace the file in one step: write a temporary file beside it, force it to disk, then rename it
         over the old one."""
         temporary = self._path.with_name(self._path.name + ".tmp")
-        # Write and sync the new list, so a power cut cannot leave an empty file behind the rename
+        # Write the new list and force it to disk
         with open(temporary, "w", encoding="utf-8") as handle:
             handle.write("".join(f"{day.isoformat()}\n" for day in days))
             handle.flush()
