@@ -29,3 +29,10 @@ Scenarios the generator handles on purpose, and why. One entry per case; code co
   slot differs from the old choice only where the old choice removed the only QC store, which stopped the run, so no run
   that finished before changes (checked by hashing every file at scales 0.01 and 0.05 before and after). The seed list
   test is `tests/test_store_slots.py`.
+
+- **GEN-22 A planted problem is recorded only for rows that are written (Bug 579).** One emitter recorded a planted
+  problem before later steps (a removed span of rows, rows delivered after the window) could drop the rows it was
+  planted on, so the manifest could count a row that never reached the files. The record now comes after routing and
+  keeps only the planted rows that are written. A written row that was not planted is not counted, so it cannot hide
+  behind a matching total. No random draw moves, so the landing files are byte-identical; only that manifest entry
+  changes. The test is `tests/test_inventory_manifest_written_rows.py`.
