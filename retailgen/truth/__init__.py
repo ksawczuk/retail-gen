@@ -18,8 +18,8 @@ from .demand import DemandEngine
 from .lifecycle import CustomerLifecycle
 from .seasonality import Seasonality
 from .campaigns import CampaignContext, calendar, email_campaigns
-from .campaign_truth import (assignment_table, campaigns_table, code_audiences, email_clicks, groups_by_campaign,
-                             prospect_customers_table, prospect_tags, truth_table)
+from .campaign_truth import (assignment_table, campaigns_table, code_audiences, consent_sync, email_clicks,
+                             groups_by_campaign, prospect_customers_table, prospect_tags, truth_table)
 from .engagement import engagement_events
 from .signups import apply_signup_campaigns
 
@@ -52,6 +52,7 @@ class Truth:
     campaign_truth: pd.DataFrame
     prospect_customers: pd.DataFrame
     engagement_events: pd.DataFrame
+    consent_sync: pd.DataFrame
 
 
 def build_truth(cfg, rng, log=print) -> Truth:
@@ -78,13 +79,14 @@ def build_truth(cfg, rng, log=print) -> Truth:
     log("truth: point of sale")
     pos = generate_pos(cfg, rng, stores, store_events, customers, price_history, promotions,
                        fx, orders, lines, returns, engine.days, purchases[store.name], baskets)
+    log("truth: email events")
+    engagement = engagement_events(rng, engine.days, ids, ctx.sends, signup.sends)
+    consent = consent_sync(rng, engagement)
     log("truth: CRM changes")
     last = pd.concat([orders[["customer_id", "order_ts"]].rename(columns={"order_ts": "ts"}),
                       pos[["customer_id", "utc_ts"]].rename(columns={"utc_ts": "ts"})]).dropna()
     last_activity = last.groupby("customer_id")["ts"].max()
-    cust_ev, addr_ev, deleted = generate_crm_changes(cfg, rng, customers, addresses, last_activity)
-    log("truth: email events")
-    engagement = engagement_events(rng, engine.days, ids, ctx.sends, signup.sends)
+    cust_ev, addr_ev, deleted = generate_crm_changes(cfg, rng, customers, addresses, last_activity, consent)
     campaign_rows = campaigns_table(specs)
     prospects = prospect_customers_table(signup)
     log("truth: clickstream")
@@ -97,7 +99,7 @@ def build_truth(cfg, rng, log=print) -> Truth:
     effects = truth_table(rng, specs, ctx, signup, purchases, engine.days, ids, orders, pos)
     t = Truth(fx, stores, store_events, categories, suppliers, products, price_history, promotions,
               customers, addresses, cust_ev, addr_ev, deleted, orders, lines, payments, shipments,
-              returns, pos, clicks, inventory, campaign_rows, assignment, effects, prospects, engagement)
+              returns, pos, clicks, inventory, campaign_rows, assignment, effects, prospects, engagement, consent)
     check_truth(t)
     return t
 

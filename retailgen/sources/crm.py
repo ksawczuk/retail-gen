@@ -94,6 +94,13 @@ def emit(cfg, rng, t, out, man):
     # A member who joins after the cut-over has no loyalty number in the extract yet
     later = (c["loyalty_join_at"] >= he).to_numpy()
     c.loc[later, ["loyalty_number", "loyalty_tier"]] = None
+    # Email unsubscribes the CRM had learned by the cut-over show as opted out
+    synced = t.consent_sync[t.consent_sync["crm_synced_at"] < he]
+    c.loc[c["customer_id"].isin(synced["customer_id"]), "marketing_opt_in"] = False
+    lagging = t.consent_sync[t.consent_sync["crm_synced_at"].isna() | (t.consent_sync["crm_synced_at"] >=
+                                                                         t.consent_sync["unsubscribed_at"].dt.normalize()
+                                                                         + pd.Timedelta(days=1))]
+    man.record("crm.consent_sync_lag", len(lagging), keys=lagging["customer_id"])
     cf = _customer_frame(cfg, rng, c, man, "customers")
     accented = cf["FIRST_NM"].str.cat(cf["LAST_NM"]).map(lambda s: any(ord(ch) > 127 for ch in s))
     mj = accented & (rng.random(len(cf)) < 0.3)

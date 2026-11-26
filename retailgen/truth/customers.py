@@ -196,7 +196,7 @@ def ship_to(addresses: pd.DataFrame) -> pd.DataFrame:
                                              "postal_code", "country"]]
 
 
-def generate_crm_changes(cfg, rng, customers, addresses, last_activity: pd.Series):
+def generate_crm_changes(cfg, rng, customers, addresses, last_activity: pd.Series, consent=None):
     """CRM change events in the increment window: inserts (new signups), updates, address moves
     and deletes. Returns (customer_events, address_events, deleted_ids); every event carries a
     full row image and its change timestamp."""
@@ -208,6 +208,12 @@ def generate_crm_changes(cfg, rng, customers, addresses, last_activity: pd.Serie
     pending = (join_at >= cutover) & (join_at > state["created_at"].to_numpy().astype(NS))
     state.loc[pending, ["loyalty_number", "loyalty_tier"]] = None
     joins = state.index[pending]
+
+    # Opt-outs the CRM learned before the cut-over are already in the extract's state
+    opt_outs = consent[consent["crm_synced_at"].notna()] if consent is not None else pd.DataFrame(
+        columns=["customer_id", "crm_synced_at"])
+    early = opt_outs[opt_outs["crm_synced_at"] < cutover]
+    state.loc[state.index.isin(early["customer_id"]), "marketing_opt_in"] = False
     cust_ev, addr_ev, deleted = [], [], set()
     next_addr = int(addresses["address_id"].str[1:].astype(int).max()) + 1
     addr_state = addresses.set_index("address_id").copy()
@@ -230,6 +236,15 @@ def generate_crm_changes(cfg, rng, customers, addresses, last_activity: pd.Serie
             state.loc[cid, ["loyalty_number", "loyalty_tier"]] = final_loyalty.loc[cid].to_numpy()
             cust_ev.append({"op": "U", "change_ts": state.loc[cid, "loyalty_join_at"], "customer_id": cid,
                             **state.loc[cid].to_dict()})
+
+        # Email unsubscribes that reach the CRM today turn the customer's opt-in off
+        synced_today = opt_outs[(opt_outs["crm_synced_at"] >= day) & (opt_outs["crm_synced_at"] < day_end)]
+        for r in synced_today.itertuples(index=False):
+            cid = r.customer_id
+            if cid in deleted or cid not in state.index or not bool(state.loc[cid, "marketing_opt_in"]):
+                continue
+            state.loc[cid, "marketing_opt_in"] = False
+            cust_ev.append({"op": "U", "change_ts": r.crm_synced_at, "customer_id": cid, **state.loc[cid].to_dict()})
 
         existing = state.index[(state["created_at"] < day) & ~state.index.isin(list(deleted))]
         if len(existing) == 0:

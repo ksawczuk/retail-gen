@@ -96,6 +96,8 @@ _DEFECTS = [
            "D events for keys that were never inserted"),
     Defect("crm.cdc_multiple_changes_same_batch", "crm", "customers_cdc", "cdc",
            "the same key changes more than once in one daily file", systemic=True),
+    Defect("crm.consent_sync_lag", "crm", "customers", "semantics",
+           "email unsubscribes that reach the CRM opt-in a day or more later, or never"),
     Defect("crm.cdc_schema_drift_loyalty_tier", "crm", "customers_cdc", "schema_drift",
            "LOYALTY_TIER column appears from 2026-10-10 onward", systemic=True),
 

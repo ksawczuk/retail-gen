@@ -14,6 +14,7 @@ LIFT_KINDS = ("seasonal", "newsletter", "reminder", "canvas")
 HOLDOUT_REDEMPTION_SHARE = 0.03
 OUTSIDE_REDEMPTION_SHARE = 0.06
 SPEND_FLOOR_PER_CUSTOMER = 50.0
+NEVER_SYNCED_SHARE = 0.10
 
 
 @dataclass(frozen=True)
@@ -201,6 +202,16 @@ def prospect_tags(prospects, campaigns):
     tags = campaigns.set_index("campaign_id")["utm_campaign"]
     return pd.DataFrame({"customer_id": prospects["customer_id"].to_numpy(),
                          "utm_campaign": prospects["campaign_id"].map(tags).to_numpy()})
+
+
+def consent_sync(rng, engagement):
+    """When each email unsubscribe reached the CRM: 0 to 2 days later, or never for 10% of them."""
+    unsub = engagement[engagement["event_type"] == "unsubscribe"].drop_duplicates("customer_id")
+    n = len(unsub)
+    lag = pd.to_timedelta(rng.random(n) * 2 * 86400, unit="s")
+    synced = (unsub["event_ts"] + lag).where(rng.random(n) >= NEVER_SYNCED_SHARE)
+    return pd.DataFrame({"customer_id": unsub["customer_id"].to_numpy(),
+                         "unsubscribed_at": unsub["event_ts"].to_numpy(), "crm_synced_at": synced.to_numpy()})
 
 
 def prospect_customers_table(signup):
