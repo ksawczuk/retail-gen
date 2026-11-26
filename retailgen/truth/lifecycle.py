@@ -12,6 +12,7 @@ DECAY_SHARE = 0.30
 DECAY_HALF_LIFE_DAYS = 120.0
 YEARLY_REACTIVATION = 0.06
 REACTIVATED_LEVEL = 0.5
+MAX_DAYS = 36_500.0
 BASKET_SIGMA = 0.3
 PREFERENCE_ALPHA = 0.5
 JOIN_AT_SIGNUP = 0.35
@@ -46,12 +47,12 @@ class CustomerLifecycle:
         # Churn: a monthly hazard, higher for low-activity customers, averaging MONTHLY_CHURN
         shape = (activity / activity.mean()) ** CHURN_ACTIVITY_POWER
         daily_hazard = MONTHLY_CHURN * shape / shape.mean() / DAYS_PER_MONTH
-        churn_after = rng.exponential(1.0 / daily_hazard)
+        churn_after = np.minimum(rng.exponential(1.0 / daily_hazard), MAX_DAYS)
         churn_at = created + (churn_after * 86400).astype("timedelta64[s]")
 
         # Some churners fade instead of stopping; some come back later at a lower level
         decays = rng.random(n) < DECAY_SHARE
-        react_after = rng.exponential(365.0 / YEARLY_REACTIVATION, n)
+        react_after = np.minimum(rng.exponential(365.0 / YEARLY_REACTIVATION, n), MAX_DAYS)
         reactivate_at = churn_at + (react_after * 86400).astype("timedelta64[s]")
 
         # Basket size multiplier (mean 1) and category preferences (most lean to two or three categories)

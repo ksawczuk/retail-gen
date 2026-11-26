@@ -51,7 +51,7 @@ class Seasonality:
         gifting = self._mothers | self._fathers
 
         # Shared curve: the generator's long-standing curve, raised in the gifting windows
-        self._shared = shared_curve(self.days) * np.where(gifting, GIFTING_TOTAL, 1.0)
+        self._shared = np.asarray(shared_curve(self.days), float) * np.where(gifting, GIFTING_TOTAL, 1.0)
 
         # Category curves: the monthly shape, times the gifting lift for that holiday's categories
         months = self.days.month.to_numpy() - 1

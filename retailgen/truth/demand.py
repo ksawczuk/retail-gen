@@ -37,6 +37,8 @@ class DemandEngine:
         self._rng = rng
         self.days = days
         self._created = np.asarray(created_at).astype(NS)
+        if (np.diff(self._created) < np.timedelta64(0, "ns")).any():
+            raise ValueError("customers must be sorted by created_at")
         self._activity = np.asarray(activity, float)
         self._lifecycle = lifecycle
         self._seasonality = seasonality
