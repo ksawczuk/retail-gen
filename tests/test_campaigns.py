@@ -42,6 +42,7 @@ class CalendarTest(unittest.TestCase):
     def test_one_winback_is_mistargeted_and_three_flights_add_customers(self):
         specs = calendar()
         self.assertEqual(sorted(s.lapsed_days for s in specs if s.kind == "winback"), [45] + [180] * 7)
+        self.assertEqual([s.sends[0].lift for s in specs if s.lapsed_days == 45], [0.0])
         self.assertEqual(sum(s.adds_customers for s in specs if s.kind == "prospects"), 3)
 
 

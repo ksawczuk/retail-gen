@@ -82,6 +82,8 @@ def truth_table(rng, specs, ctx, signup, purchases, days, customer_ids, orders, 
     credit = np.concatenate([p.campaign for p in purchases.values()])
     buyer = pd.Series(np.where(cust >= 0, customer_ids[np.maximum(cust, 0)], None))
     send_day = {s.campaign_id: [int(days.get_indexer([pd.Timestamp(x.day)])[0]) for x in s.sends] for s in specs}
+    fatigue = _fatigue_by_campaign(ctx)
+    redemptions = _code_redemptions_by_group(specs, groups, orders)
 
     rows = []
     for s in specs:
@@ -90,6 +92,8 @@ def truth_table(rng, specs, ctx, signup, purchases, days, customer_ids, orders, 
         row["treated_customers"] = len(g.get("treated", set()))
         row["holdout_customers"] = len(g.get("holdout", set()) | g.get("holdout_contaminated", set()))
         row["contaminated_holdout_customers"] = len(groups.get(s.campaign_id + "R", {}).get("contaminating", set()))
+        row.update(fatigue.get(s.campaign_id, {}))
+        row.update(redemptions.get(s.campaign_id, {}))
 
         # Lift campaigns: purchases by the treated in the window, the credited ones, and the realized lift
         if s.kind in LIFT_KINDS:
@@ -126,6 +130,41 @@ def truth_table(rng, specs, ctx, signup, purchases, days, customer_ids, orders, 
     idle = flights & (table["incremental_customers"] == 0)
     table.loc[idle, "spend"] = np.round(typical * rng.uniform(0.6, 1.2, int(idle.sum())), 2)
     return table
+
+
+def _fatigue_by_campaign(ctx):
+    """Per campaign: sends, the mean response factor, and the share of sends to someone over-sent (more than four
+    sends in 30 days), plus sends after an unsubscribe and without consent."""
+    out = {}
+    for s in ctx.sends:
+        row = out.setdefault(s.campaign_id, {"sends": 0, "_factor": 0.0, "_over": 0, "sends_after_unsubscribe": 0,
+                                             "sends_without_consent": 0})
+        row["sends"] += len(s.customers)
+        row["_factor"] += float(s.fatigue.sum())
+        row["_over"] += int((s.fatigue < 1.0).sum())
+        row["sends_after_unsubscribe"] += int(s.after_unsubscribe.sum())
+        row["sends_without_consent"] += int(s.no_consent.sum())
+    for row in out.values():
+        n = max(row["sends"], 1)
+        row["mean_fatigue_factor"] = round(row.pop("_factor") / n, 4)
+        row["over_sent_share"] = round(row.pop("_over") / n, 4)
+    return out
+
+
+def _code_redemptions_by_group(specs, groups, orders):
+    """Per campaign with a code: online redemptions by its treated, its holdout, and everyone else."""
+    out = {}
+    for s in specs:
+        if not s.promo_code:
+            continue
+        g = groups.get(s.campaign_id, {})
+        holdout = g.get("holdout", set()) | g.get("holdout_contaminated", set())
+        users = orders.loc[orders["coupon_code"] == s.promo_code, "customer_id"]
+        treated = users.isin(g.get("treated", set()))
+        held = users.isin(holdout)
+        out[s.campaign_id] = {"redemptions_treated": int(treated.sum()), "redemptions_holdout": int(held.sum()),
+                              "redemptions_outside": int((~treated & ~held).sum())}
+    return out
 
 
 def _flight_economics(rng, spec, signup, orders, pos_lines):

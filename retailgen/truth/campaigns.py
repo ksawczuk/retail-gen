@@ -131,8 +131,10 @@ def calendar():
     # Win-back, one per quarter; August 2025 calls 45 days lapsed and reaches active customers
     for k, day in enumerate(["2025-02-10", "2025-05-12", "2025-08-11", "2025-11-10",
                              "2026-02-09", "2026-05-11", "2026-08-10", "2026-11-09"]):
-        c.append(CampaignSpec(f"CMP-W{k + 1}", f"Win-back {day[:7]}", "winback", (Send(day, 0.04),),
-                              WINBACK_DAYS, lapsed_days=45 if day == "2025-08-11" else 180))
+        mistargeted = day == "2025-08-11"
+        c.append(CampaignSpec(f"CMP-W{k + 1}", f"Win-back {day[:7]}", "winback",
+                              (Send(day, 0.0 if mistargeted else 0.04),), WINBACK_DAYS,
+                              lapsed_days=45 if mistargeted else 180))
 
     # Gain loyalty members
     for k, day in enumerate(["2025-03-20", "2025-06-20", "2025-09-20", "2026-01-20", "2026-04-20",
