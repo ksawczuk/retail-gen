@@ -36,7 +36,9 @@ Scenarios the generator handles on purpose, and why. One entry per case; code co
   runs of the same code, so it needs no stored baseline; it also checks the 92 increment folders end at 2026-12-31.
   Volumes stay at today's: the day's expected total is the base rate (600 online, 600 store at full scale) times the
   seasonality, the same curve as before except the gifting windows (GEN-10). At scale 0.1 the totals over the window
-  were within 1.1% of that expectation.
+  were within 1.1% of that expectation. The longer window also moves the random stream before the store draw, so the
+  GEN-04 case (no US store, the only QC store at slot 1) moved from seed 13 to seed 28 at scale 0.01;
+  `tests/test_store_slots.py` now finds that seed by the draw's shape instead of naming it.
 - **GEN-06 Every store basket has a true customer; the card scan decides what the POS shows.** The truth carries
   `true_customer_id` on every sale. `customer_id` is filled only when the true customer is a loyalty member who had
   joined by the sale and the card was scanned (`SCAN_RATE` 0.73), which keeps about 40% of baskets scanned, as before.
