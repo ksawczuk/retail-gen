@@ -26,7 +26,7 @@ generate.py
     campaigns   answer key: designs, audiences, what each campaign truly did; email events
     check_truth referential + arithmetic assertions
   EMITTERS                                retailgen/sources/__init__.py
-    crm, pim, storeops, finance, promo, oms, pos, web, inventory
+    crm, pim, storeops, finance, promo, oms, pos, web, inventory, ads, braze
       -> Output (retailgen/writers.py): CSV / JSONL / JSON / Parquet, LF endings
       -> Manifest (retailgen/manifest.py): defect id, count, example keys
            metadata looked up in the catalogue (retailgen/defects.py)

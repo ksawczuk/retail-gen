@@ -92,3 +92,14 @@ Scenarios the generator handles on purpose, and why. One entry per case; code co
 - **GEN-18 The newsletter and the post-purchase email are measured per send.** Their audience changes with every
   send, so their window purchases count each recipient's own send window, cut short where the same customer's next
   send begins; no purchase counts twice.
+- **GEN-19 Avro is written through a seam, and a run can leave one source out.** `retailgen/avro.py` writes with
+  `fastavro` when it is installed and otherwise stops the run at the Braze source with one line naming the library.
+  `generate.py --skip-source NAME` leaves a source out; `run.json` lists it, the end-of-run guard ignores that
+  source's catalogue entries, and `validate.py` prints a SKIP line for its checks. Braze and ads run last, so leaving
+  Braze out does not change any other source's files. The tests that run the generator leave Braze out when
+  `fastavro` is not installed.
+- **GEN-20 Email clicks open their own web session.** Each email click inside the tracking window opens a session
+  with the newsletter source, the email medium and the campaign's tag, landing on the campaign page; a paid flight's
+  customer's first signed-in session carries the agency source and the flight's tag.
+- **GEN-21 Email unsubscribes reach the CRM opt-in through a sync table.** `consent_sync` in the answer key holds
+  when each unsubscribe reached the CRM; the cut-over extract and the change feed take the opt-in from it.

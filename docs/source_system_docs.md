@@ -167,7 +167,7 @@ Tracking went live **2026-01-01**. Only visitors who accept analytics cookies ar
  "page": {"path": "/p/004512", "referrer": null},
  "product": {"sku": "004512", "price": 49.99},
  "ecommerce": {"order_id": "ORD-..."},
- "utm": {"source": "newsletter", "medium": "email"}}
+ "utm": {"source": "newsletter", "medium": "email", "campaign": "spring_2025"}}
 ```
 `event_name`: `page_view`, `product_view`, `add_to_cart`, `begin_checkout`, `purchase`.
 `ts` is epoch milliseconds. `event_id` is unique. `product`, `ecommerce` and `utm` appear
@@ -187,3 +187,28 @@ open store, taken Sunday night and delivered Monday: `snapshot_date`, `store_id`
 
 `finance/fx_rates` — daily USD→CAD rate (CAD per 1 USD): `rate_date`, `from_ccy`, `to_ccy`,
 `rate`. History in `fx_rates_history.csv`, then `fx_rates_YYYYMMDD.csv` per business day.
+
+---
+
+## 10. Braze email platform (`braze`) — owner: CRM Marketing
+
+Currents export, one Avro file set per event type under `braze/<type>/`: `sends`, `deliveries`,
+`bounces`, `opens`, `clicks`, `unsubscribes`. History is monthly (`email_<type>_YYYY-MM.avro`),
+then daily (`email_<type>_YYYYMMDD.avro`). Every record has `id`, `time` (epoch ms),
+`campaign_id`, `campaign_name`, `user_id` (the Braze id) and `external_user_id` (our customer
+id). Opens carry `machine_open`; clicks carry the landing `url`; bounces a `bounce_type`; sends a
+`send_id`. Every event is exported exactly once, on the day it happens.
+
+`braze/campaigns/campaigns_YYYYMMDD.json` is the campaign list as of that day (`id`, `name`,
+`tags`, `created_at`); the tag is the `utm_campaign` the landing links use, and names follow
+the snake-case convention. `braze/users/users_YYYYMMDD.csv` maps Braze ids to customer ids:
+`braze_id`, `external_id`, `first_seen`, `identified_at`. "Every profile is created from a
+customer record, so `external_id` is always our `CUST_ID`."
+
+---
+
+## 11. Ad agencies (`ads`) — owner: Growth
+
+`ads/spend/ads_spend_*.csv` — the agencies' daily report for paid flights: `date`, `agency`,
+`utm_campaign`, `impressions`, `clicks`, `spend`, `currency`. History is monthly, then one
+file per day. "Both agencies bill in Canadian dollars, every day of every flight."

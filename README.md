@@ -6,8 +6,9 @@ documented by people who were slightly wrong. This repo generates that kind of d
 known level of dirtiness, for working through a Databricks medallion build: ingestion →
 bronze → cleansing → silver → gold.
 
-The company is *Larchwood Supply Co.*, a fictional Canadian retailer with nine source systems:
-CRM, PIM, store ops, e-commerce OMS, POS, promotions, web analytics, inventory and FX. There
+The company is *Larchwood Supply Co.*, a fictional Canadian retailer with eleven source systems:
+CRM, PIM, store ops, e-commerce OMS, POS, promotions, web analytics, inventory, FX, the Braze
+email platform and the ad agencies' spend reports. There
 are ~21 months of history (2025-01-01 → 2026-09-30), then 92 daily increments
 (2026-10-01 → 2026-12-31) that you release one day at a time, so your ingestion sees files
 arrive the way it would in production.
@@ -15,7 +16,7 @@ arrive the way it would in production.
 ### How it is built
 
 ```
-seed ─▶ clean "truth" world ─▶ check_truth() ─▶ 9 source emulators ─▶ landing files
+seed ─▶ clean "truth" world ─▶ check_truth() ─▶ 11 source emulators ─▶ landing files
           (what really              (proves it's        (each adds its own     │
            happened)                 consistent)         defects, and logs     │
                                                          every one)            ▼
@@ -60,7 +61,9 @@ takes about 3.5 minutes and writes about 42 MB.
 
 ## Generate
 
-Needs Python 3 with numpy, pandas and pyarrow (built with numpy 2.4, pandas 3.0, pyarrow 23):
+Needs Python 3 with numpy, pandas and pyarrow (built with numpy 2.4, pandas 3.0, pyarrow 23), and
+`fastavro==1.10.0` for the Braze files (without it, the run stops at the Braze source with a
+one-line message; `--skip-source braze` leaves that source out):
 
 ```bash
 python generate.py
