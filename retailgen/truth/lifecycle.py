@@ -55,7 +55,7 @@ class CustomerLifecycle:
         react_after = np.minimum(rng.exponential(365.0 / YEARLY_REACTIVATION, n), MAX_DAYS)
         reactivate_at = churn_at + (react_after * 86400).astype("timedelta64[s]")
 
-        # Basket size multiplier (mean 1) and category preferences (most lean to two or three categories)
+        # Basket size multiplier (mean 1) and category preferences (the top three hold about two-thirds)
         basket_mult = rng.lognormal(-BASKET_SIGMA ** 2 / 2, BASKET_SIGMA, n)
         preferences = rng.dirichlet(np.full(n_categories, PREFERENCE_ALPHA), size=n)
         return cls(churn_at.astype(NS), decays, reactivate_at.astype(NS), basket_mult, preferences)

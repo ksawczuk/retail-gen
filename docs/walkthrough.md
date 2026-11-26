@@ -69,7 +69,7 @@ validate.py                               re-reads the files; does not import re
   (`true_customer_id` in the truth). The POS shows `customer_id` only when a loyalty
   member who had already joined scans their card, about 40% of baskets.
 - **Baskets.** `truth/baskets.py` picks each line's category from the customer's taste
-  (a Dirichlet draw, most lean to two or three categories) times that month's category
+  (a Dirichlet draw; the top three categories hold about two-thirds of a customer's taste) times that month's category
   season, then a SKU in that category launched by then. A customer's basket multiplier
   scales both the number of lines and the quantities.
 

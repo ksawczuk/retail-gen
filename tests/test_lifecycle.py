@@ -66,6 +66,11 @@ class BuildTest(unittest.TestCase):
         low, high = activity < np.quantile(activity, 0.25), activity > np.quantile(activity, 0.75)
         self.assertLess(np.median(days[low]), np.median(days[high]))
 
+    def test_about_six_percent_come_back_within_a_year_of_churning(self):
+        """Comebacks follow a yearly rate of 6%, so 1 - exp(-0.06), about 5.8%, come back within 365 days."""
+        within_year = (self.life.reactivate_at - self.life.churn_at) / np.timedelta64(1, "D") < 365
+        self.assertAlmostEqual(within_year.mean(), 1 - np.exp(-0.06), delta=0.003)
+
     def test_decay_share(self):
         self.assertAlmostEqual(self.life.decays.mean(), DECAY_SHARE, delta=0.01)
 
