@@ -40,34 +40,11 @@ def generate_customers(cfg, rng):
     n = cfg.n_customers
     n_dup = max(5, int(n * 0.03))
     n_p = n - n_dup
-    fi = rng.integers(len(ref.FIRST_NAMES), size=n_p)
-    li = rng.integers(len(ref.LAST_NAMES), size=n_p)
-    cw = np.array([c[6] for c in ref.CITIES], float)
-    city = rng.choice(len(ref.CITIES), size=n_p, p=cw / cw.sum())
     early = rng.random(n_p) < 0.55
     created = np.where(early,
                        _random_times(rng, "2021-01-01", cfg.history_start, n_p),
                        _random_times(rng, cfg.history_start, cfg.increment_end, n_p))
-    birth = pd.Timestamp("1950-01-01") + pd.to_timedelta(rng.integers(0, 365 * 57, n_p), unit="D")
-    birth = pd.Series(birth).where(rng.random(n_p) > 0.08)
-    is_emp = rng.random(n_p) < 0.01
-    phones, emails = [], []
-    for k in range(n_p):
-        area = ref.CITIES[city[k]][5][rng.integers(len(ref.CITIES[city[k]][5]))]
-        phones.append(f"+1{area}555{rng.integers(0, 10000):04d}")
-        local = _email_local(ref.FIRST_NAMES[fi[k]][0], ref.LAST_NAMES[li[k]])
-        if rng.random() < 0.6:
-            local += str(rng.integers(1, 999))
-        dom = cfg.employee_domain if is_emp[k] else ref.EMAIL_DOMAINS[rng.integers(len(ref.EMAIL_DOMAINS))]
-        emails.append(f"{local}@{dom}")
-    people = pd.DataFrame({
-        "person_id": np.arange(1, n_p + 1),
-        "first_name": [ref.FIRST_NAMES[i][0] for i in fi],
-        "nickname": [ref.FIRST_NAMES[i][1] for i in fi],
-        "last_name": [ref.LAST_NAMES[i] for i in li],
-        "email": emails, "phone": phones, "birth_date": birth.astype(NS).to_numpy(),
-        "city_idx": city, "created_at": pd.to_datetime(created).astype(NS), "is_employee": is_emp,
-    })
+    people = _people(cfg, rng, created, first_person_id=1, staff_share=0.01)
 
     # Second records for some people: nickname, typo, different email, later signup.
     cand = people[(~people["is_employee"]) &
@@ -103,12 +80,75 @@ def generate_customers(cfg, rng):
                          for e, k in zip(cust["email"], dupe_n)]
     cust = cust.sort_values("created_at").reset_index(drop=True)
     cust.insert(0, "customer_id", [f"C{1000001 + i}" for i in range(len(cust))])
+    cust = _customer_attributes(cfg, rng, cust, taken_numbers=set())
 
+    addresses = _addresses(cfg, rng, cust)
+    return cust.drop(columns=["nickname"]), addresses
+
+
+def add_customers(cfg, rng, customers, addresses, created_at):
+    """Add new customers signed up at the given times, with addresses; returns (customers, addresses, new ids),
+    the customers re-sorted by signup. Called by the Prospects flights that bring real new customers."""
+    # Build the people and give them ids after the highest existing one
+    people = _people(cfg, rng, np.asarray(created_at).astype(NS),
+                     first_person_id=int(customers["person_id"].max()) + 1, staff_share=0.0)
+    start = int(customers["customer_id"].str[1:].astype(int).max()) + 1
+    people.insert(0, "customer_id", [f"C{start + i}" for i in range(len(people))])
+
+    # Keep logins unique against the existing customers
+    taken = set(customers["email"])
+    people["email"] = [e if e not in taken else e.replace("@", f"{k + 1}@", 1)
+                       for k, e in enumerate(people["email"])]
+
+    # Same attributes and addresses as any signup; loyalty numbers never reused
+    new = _customer_attributes(cfg, rng, people, taken_numbers=set(customers["loyalty_number"].dropna()))
+    new_addresses = _addresses(cfg, rng, new)
+    next_addr = int(addresses["address_id"].str[1:].astype(int).max()) + 1
+    new_addresses["address_id"] = [f"A{next_addr + i}" for i in range(len(new_addresses))]
+    out = pd.concat([customers, new.drop(columns=["nickname"])], ignore_index=True)
+    out = out.sort_values("created_at", kind="stable").reset_index(drop=True)
+    return out, pd.concat([addresses, new_addresses], ignore_index=True), list(new["customer_id"])
+
+
+def _people(cfg, rng, created, first_person_id, staff_share):
+    """People with names, contact details, a home city and a signup time (one per entry of `created`)."""
+    n_p = len(created)
+    fi = rng.integers(len(ref.FIRST_NAMES), size=n_p)
+    li = rng.integers(len(ref.LAST_NAMES), size=n_p)
+    cw = np.array([c[6] for c in ref.CITIES], float)
+    city = rng.choice(len(ref.CITIES), size=n_p, p=cw / cw.sum())
+    birth = pd.Timestamp("1950-01-01") + pd.to_timedelta(rng.integers(0, 365 * 57, n_p), unit="D")
+    birth = pd.Series(birth).where(rng.random(n_p) > 0.08)
+    is_emp = rng.random(n_p) < staff_share
+    phones, emails = [], []
+    for k in range(n_p):
+        area = ref.CITIES[city[k]][5][rng.integers(len(ref.CITIES[city[k]][5]))]
+        phones.append(f"+1{area}555{rng.integers(0, 10000):04d}")
+        local = _email_local(ref.FIRST_NAMES[fi[k]][0], ref.LAST_NAMES[li[k]])
+        if rng.random() < 0.6:
+            local += str(rng.integers(1, 999))
+        dom = cfg.employee_domain if is_emp[k] else ref.EMAIL_DOMAINS[rng.integers(len(ref.EMAIL_DOMAINS))]
+        emails.append(f"{local}@{dom}")
+    return pd.DataFrame({
+        "person_id": np.arange(first_person_id, first_person_id + n_p),
+        "first_name": [ref.FIRST_NAMES[i][0] for i in fi],
+        "nickname": [ref.FIRST_NAMES[i][1] for i in fi],
+        "last_name": [ref.LAST_NAMES[i] for i in li],
+        "email": emails, "phone": phones, "birth_date": birth.astype(NS).to_numpy(),
+        "city_idx": city, "created_at": pd.to_datetime(created).astype(NS), "is_employee": is_emp,
+    })
+
+
+def _customer_attributes(cfg, rng, cust, taken_numbers):
+    """Add loyalty (number, join date, tier), consent, activity and home province to customer rows."""
     # Loyalty: membership by the end of the window, a join date per member, and a tier from activity
+    cust = cust.copy()
     m = len(cust)
     is_emp_all = cust["is_employee"].to_numpy()
     in_loyalty = (rng.random(m) < MEMBER_SHARE) | is_emp_all
-    nums = rng.permutation(np.unique(rng.integers(100_000_000, 999_999_999, size=int(m * 1.2))))[:m]
+    taken = np.array([int(x[1:]) for x in taken_numbers], dtype=np.int64)
+    pool = np.setdiff1d(np.unique(rng.integers(100_000_000, 999_999_999, size=int(m * 1.2) + 10)), taken)
+    nums = rng.permutation(pool)[:m]
     cust["loyalty_number"] = np.where(in_loyalty, [f"L{x}" for x in nums], None)
     cust["marketing_opt_in"] = rng.random(m) < 0.55
     cust["activity"] = rng.lognormal(0, 1.0, m)
@@ -117,9 +157,7 @@ def generate_customers(cfg, rng):
     cust["loyalty_join_at"] = np.where(is_emp_all, cust["created_at"].to_numpy().astype(NS), joined).astype(NS)
     cust["province"] = [ref.CITIES[i][1] for i in cust["city_idx"]]
     cust["country"] = [ref.CITIES[i][2] for i in cust["city_idx"]]
-
-    addresses = _addresses(cfg, rng, cust)
-    return cust.drop(columns=["nickname"]), addresses
+    return cust
 
 
 def _address_row(rng, ci):

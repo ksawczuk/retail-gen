@@ -17,6 +17,11 @@ from .baskets import BasketBuilder
 from .demand import DemandEngine
 from .lifecycle import CustomerLifecycle
 from .seasonality import Seasonality
+from .campaigns import CampaignContext, calendar, email_campaigns
+from .campaign_truth import (assignment_table, campaigns_table, code_audiences, groups_by_campaign,
+                             prospect_customers_table, truth_table)
+from .engagement import engagement_events
+from .signups import apply_signup_campaigns
 
 
 @dataclass
@@ -42,6 +47,11 @@ class Truth:
     pos_lines: pd.DataFrame
     clickstream: pd.DataFrame
     inventory: pd.DataFrame
+    campaigns: pd.DataFrame
+    campaign_assignment: pd.DataFrame
+    campaign_truth: pd.DataFrame
+    prospect_customers: pd.DataFrame
+    engagement_events: pd.DataFrame
 
 
 def build_truth(cfg, rng, log=print) -> Truth:
@@ -52,13 +62,19 @@ def build_truth(cfg, rng, log=print) -> Truth:
     promotions = generate_promotions(cfg)
     log("truth: customers")
     customers, addresses = generate_customers(cfg, rng)
-    log("truth: lifecycle and demand")
-    engine, baskets = build_demand(cfg, rng, customers, products, categories)
+    log("truth: signup campaigns")
+    specs = calendar()
+    customers, addresses, signup = apply_signup_campaigns(cfg, rng, customers, addresses, specs)
+    log("truth: lifecycle, campaigns and demand")
+    engine, baskets, ctx = build_demand(cfg, rng, customers, products, categories, specs)
     online, store = online_channel(cfg), store_channel(cfg)
     purchases = engine.draw_all([online, store])
+    ids = customers["customer_id"].to_numpy()
+    audiences = code_audiences(specs, groups_by_campaign(ctx, ids))
     log("truth: online orders")
     orders, lines, payments, shipments, returns = generate_online(
-        cfg, rng, customers, addresses, price_history, promotions, fx, engine.days, purchases[online.name], baskets)
+        cfg, rng, customers, addresses, price_history, promotions, fx, engine.days, purchases[online.name], baskets,
+        audiences)
     log("truth: point of sale")
     pos = generate_pos(cfg, rng, stores, store_events, customers, price_history, promotions,
                        fx, orders, lines, returns, engine.days, purchases[store.name], baskets)
@@ -71,23 +87,33 @@ def build_truth(cfg, rng, log=print) -> Truth:
     clicks = generate_clickstream(cfg, rng, orders, lines, customers, products, price_history, engine)
     log("truth: inventory")
     inventory = generate_inventory(cfg, rng, stores, store_events, products)
+    log("truth: campaign answer key and engagement")
+    campaign_rows = campaigns_table(specs)
+    assignment = assignment_table(ctx, ids, engine.days, signup)
+    effects = truth_table(rng, specs, ctx, signup, purchases, engine.days, ids, orders, pos)
+    prospects = prospect_customers_table(signup)
+    engagement = engagement_events(rng, engine.days, ids, ctx.sends, signup.sends)
     t = Truth(fx, stores, store_events, categories, suppliers, products, price_history, promotions,
               customers, addresses, cust_ev, addr_ev, deleted, orders, lines, payments, shipments,
-              returns, pos, clicks, inventory)
+              returns, pos, clicks, inventory, campaign_rows, assignment, effects, prospects, engagement)
     check_truth(t)
     return t
 
 
-def build_demand(cfg, rng, customers, products, categories, modifiers=()):
-    """Wire the lifecycle, seasonality, demand engine and basket builder for the whole window.
-    Called by build_truth after the customers; campaigns (Story 771) arrive as modifiers."""
+def build_demand(cfg, rng, customers, products, categories, specs=()):
+    """Wire the lifecycle, seasonality, email campaigns, demand engine and basket builder for the whole window.
+    Called by build_truth after the signup campaigns; returns (engine, baskets, campaign context)."""
     days = pd.date_range(cfg.history_start, cfg.increment_end, freq="D")
     category_names = categories.loc[categories["level"] == 2, "category_name"].tolist()
     seasons = Seasonality(days, category_names)
     lifecycle = CustomerLifecycle.build(rng, customers, len(category_names))
+    ctx = CampaignContext(rng, days, customers["created_at"].to_numpy().astype("datetime64[ns]"),
+                          customers["marketing_opt_in"].to_numpy(bool),
+                          customers["loyalty_join_at"].to_numpy().astype("datetime64[ns]"), lifecycle)
+    modifiers = email_campaigns(specs, ctx)
     engine = DemandEngine(rng, days, customers["created_at"], customers["activity"], lifecycle, seasons, modifiers)
     baskets = BasketBuilder(products, seasons, lifecycle.preferences, lifecycle.basket_mult)
-    return engine, baskets
+    return engine, baskets, ctx
 
 
 def check_truth(t: Truth):
@@ -122,3 +148,6 @@ def check_truth(t: Truth):
     nxt = ph.groupby("sku")["valid_from"].shift(-1)
     need(((ph["valid_to"] == nxt) | (ph["valid_to"].isna() & nxt.isna())).all(), "price history contiguous")
     need(t.clickstream["event_id"].is_unique, "click event ids unique")
+    need(set(t.campaign_assignment["customer_id"]) <= cust, "campaign audiences -> customers")
+    need(set(t.prospect_customers["customer_id"]) <= cust, "Prospects customers -> customers")
+    need(set(t.engagement_events["customer_id"]) <= cust, "email events -> customers")

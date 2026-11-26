@@ -29,7 +29,8 @@ def write_truth(t, folder: Path):
     folder.mkdir(parents=True, exist_ok=True)
     for name in ["customers", "addresses", "customer_events", "address_events", "orders", "order_lines",
                  "payments", "shipments", "returns", "pos_lines", "products", "price_history",
-                 "categories", "suppliers", "promotions", "stores", "fx", "inventory", "clickstream"]:
+                 "categories", "suppliers", "promotions", "stores", "fx", "inventory", "clickstream",
+                 "campaigns", "campaign_assignment", "campaign_truth", "prospect_customers", "engagement_events"]:
         df = getattr(t, name).copy()
         for c in df.columns:
             if df[c].dtype == object:

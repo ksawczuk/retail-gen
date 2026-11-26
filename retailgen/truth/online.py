@@ -7,12 +7,14 @@ from ..util import seconds_in_day
 from .masterdata import price_lookup, fx_on
 from .customers import ship_to
 from .demand import Channel
+from .campaign_truth import HOLDOUT_REDEMPTION_SHARE, OUTSIDE_REDEMPTION_SHARE
 
 NS = "datetime64[ns]"
 ONLINE_HOURS = [1, .6, .4, .3, .3, .5, 1, 1.5, 2, 2.5, 3, 3, 3, 3, 3, 3.5, 4, 4.5, 5, 5.5, 5, 4, 3, 2]
 GUEST_SHARE = 0.12
 ONLINE_EXTRA_LINES = 1.2
 ONLINE_QTY_RATE = 0.28
+CODE_SHARE = 0.40
 
 
 def online_channel(cfg):
@@ -24,7 +26,8 @@ def _hours(rng, n, lo, hi):
     return pd.to_timedelta(rng.uniform(lo, hi, n), unit="h")
 
 
-def generate_online(cfg, rng, customers, addresses, price_history, promos, fx, days, purchases, baskets):
+def generate_online(cfg, rng, customers, addresses, price_history, promos, fx, days, purchases, baskets,
+                    code_audiences):
     """Online orders with their lines, payments, shipments and returns. Who orders and when comes from the
     demand engine's purchases; the lines from the basket builder. Called by build_truth after the draw."""
     # Give each drawn order a time of day, in time order
@@ -72,14 +75,19 @@ def generate_online(cfg, rng, customers, addresses, price_history, promos, fx, d
     lines["unit_price"] = np.where(usd, np.round(price_cad / rate, 2), price_cad)
     lines["gross"] = np.round(lines["qty"] * lines["unit_price"], 2)
 
-    # Coupons: each promo is used by a share of orders placed while it runs.
+    # Coupons: a promo is used by a share of orders placed while it runs; a campaign's code by its audience
     coupon = np.full(n, None, dtype=object)
     web_promos = promos[promos["channels"].str.contains("web")]
+    buyer = orders["customer_id"].to_numpy()
     for p in web_promos.sample(frac=1, random_state=int(rng.integers(1 << 31))).itertuples(index=False):
         end = p.ends_at + pd.Timedelta(days=1) if pd.notna(p.ends_at) else cfg.increment_end + pd.Timedelta(days=1)
-        share = 0.03 if pd.isna(p.ends_at) else 0.25
-        hit = (ts >= p.starts_at.to_datetime64()) & (ts < end.to_datetime64()) & pd.isna(coupon) & (rng.random(n) < share)
-        coupon[hit] = p.code
+        open_ = (ts >= p.starts_at.to_datetime64()) & (ts < end.to_datetime64()) & pd.isna(coupon)
+        audience = code_audiences.get(p.code)
+        if audience is None:
+            share = 0.03 if pd.isna(p.ends_at) else 0.25
+            coupon[open_ & (rng.random(n) < share)] = p.code
+            continue
+        coupon[_code_redemptions(rng, open_, buyer, audience)] = p.code
     orders["coupon_code"] = coupon
     subtotal = lines.groupby("oi")["gross"].sum().reindex(range(n)).to_numpy()
     pinfo = promos.set_index("code")
@@ -133,6 +141,26 @@ def generate_online(cfg, rng, customers, addresses, price_history, promos, fx, d
     lines = lines.drop(columns=["oi"])
     orders = orders.drop(columns=["tax_rate"])
     return orders, lines, payments, shipments, returns
+
+
+def _code_redemptions(rng, open_, buyer, audience):
+    """Orders that redeem a campaign's code: the treated use it; a leaking code also reaches the holdout and
+    customers outside the audience, as a set share of all redemptions."""
+    treated = np.isin(buyer, list(audience.treated))
+    hit = open_ & treated & (rng.random(len(buyer)) < CODE_SHARE)
+    if not audience.leaks:
+        return hit
+
+    # Leaks: add holdout and outside redemptions as their shares of the total
+    n_treated = int(hit.sum())
+    total = n_treated / (1 - HOLDOUT_REDEMPTION_SHARE - OUTSIDE_REDEMPTION_SHARE)
+    holdout = np.flatnonzero(open_ & np.isin(buyer, list(audience.holdout)))
+    outside = np.flatnonzero(open_ & ~treated & ~np.isin(buyer, list(audience.holdout)))
+    for pool, share in ((holdout, HOLDOUT_REDEMPTION_SHARE), (outside, OUTSIDE_REDEMPTION_SHARE)):
+        k = min(len(pool), int(round(total * share)))
+        if k:
+            hit[rng.choice(pool, size=k, replace=False)] = True
+    return hit
 
 
 def _payments(rng, orders):
