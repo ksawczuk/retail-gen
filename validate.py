@@ -72,30 +72,58 @@ def parquet_rows(path):
         return None
 
 
-def braze_checks(stage, cnt):
-    """The Braze files: exactly one _resend, its original a day earlier and smaller; with fastavro, the original
-    fails to read and duplicate event ids match the manifest. Called by main unless the run skipped Braze."""
-    resends = files(stage, "**/braze/*/*_resend.avro")
-    originals = [p.parent.parent.parent / f"day={(pd.Timestamp(p.parent.parent.parent.name[4:]) - pd.Timedelta(days=1)):%Y-%m-%d}"
-                 / p.parent.parent.name / p.parent.name / p.name.replace("_resend", "") for p in resends]
-    ok = len(resends) == 1 and originals[0].exists() and originals[0].stat().st_size < resends[0].stat().st_size
-    check("one Braze file cut off and re-sent whole the next day", ok, ", ".join(p.name for p in resends))
+def day_before(resend):
+    """The original of a re-sent file: the same source, entity and name, without `_resend`, in the previous day's
+    folder (increments/day=D/braze/<entity>/name). Called by braze_checks."""
+    entity_dir = resend.parent
+    day_dir = entity_dir.parent.parent
+    previous = pd.Timestamp(day_dir.name[len("day="):]) - pd.Timedelta(days=1)
+    return (day_dir.parent / f"day={previous:%Y-%m-%d}" / entity_dir.parent.name / entity_dir.name
+            / resend.name.replace("_resend", ""))
+
+
+def fastavro_reader():
+    """A function that returns one Avro file's records, or None when fastavro is not installed.
+    Called by braze_checks when no reader is given."""
     try:
         import fastavro
     except ImportError:
+        return None
+
+    def read(path):
+        with open(path, "rb") as handle:
+            return list(fastavro.reader(handle))
+    return read
+
+
+def braze_checks(stage, cnt, cut_off, read_records=None):
+    """The Braze files: exactly one _resend, its original a day earlier, smaller and recorded as cut off in the
+    manifest; when the files can be read, the cut-off file fails to read and duplicate event ids match the manifest.
+    `cut_off` holds the file names the manifest records as cut off; `read_records` returns one file's records.
+    Called by main unless the run skipped Braze."""
+    resends = files(stage, "**/braze/*/*_resend.avro")
+    originals = [day_before(p) for p in resends]
+    ok = (len(resends) == 1 and originals[0].exists() and originals[0].name in cut_off
+          and originals[0].stat().st_size < resends[0].stat().st_size)
+    check("one Braze file cut off and re-sent whole the next day", ok, ", ".join(p.name for p in resends))
+    read_records = read_records or fastavro_reader()
+    if read_records is None:
         print("SKIP  Braze event checks: fastavro is not installed, so the Avro files cannot be read")
         return
-    ids, cut_off_reads = [], True
+    # The cut-off file's records arrive again in its re-send, so its ids are never counted
+    ids, cut_off_reads = [], False
     for p in files(stage, "**/braze/*/*.avro"):
         try:
-            with open(p, "rb") as handle:
-                ids.extend(r["id"] for r in fastavro.reader(handle))
+            records = read_records(p)
         except Exception:
-            if originals and p == originals[0]:
-                cut_off_reads = False
-                continue
-            unreadable.append(p.name)
-    check("the cut-off Braze file does not read", not cut_off_reads, originals[0].name if originals else "")
+            if p.name not in cut_off:
+                unreadable.append(p.name)
+            continue
+        if p.name in cut_off:
+            cut_off_reads = True
+            continue
+        ids.extend(r["id"] for r in records)
+    check("the cut-off Braze file does not read", not cut_off_reads, ", ".join(sorted(cut_off)))
     dups = len(ids) - len(set(ids))
     check("Braze duplicate event ids = manifest", dups == cnt("braze.duplicate_events"),
           f"{dups} vs {cnt('braze.duplicate_events')}")
@@ -244,7 +272,8 @@ def main(out):
     if "braze" in skipped:
         print("SKIP  Braze checks: the run left the braze source out")
     else:
-        braze_checks(stage, cnt)
+        cut_off = set(D["braze.corrupt_file_resent"]["keys"]) if "braze.corrupt_file_resent" in D else set()
+        braze_checks(stage, cnt, cut_off)
 
     check("every file opens cleanly", not unreadable, ", ".join(sorted(set(unreadable))[:3]))
 
