@@ -263,6 +263,11 @@ class EmailCampaign(DemandModifier):
         self._fatigue = np.array([])
         self.holdout = np.array([], dtype=int)
 
+    @property
+    def treated(self):
+        """The customers this campaign treats (positions in the customers' order)."""
+        return self._treated
+
     def eligible(self, day_index, state):
         """Who may receive the campaign on its first send (opted-in customers by default)."""
         return np.flatnonzero(self._ctx.reachable(day_index))
@@ -363,7 +368,7 @@ class ReminderCampaign(EmailCampaign):
         holdout = self._parent.holdout
         leaked = holdout[self._ctx.rng.random(len(holdout)) < CONTAMINATED_SHARE]
         self._ctx.assign(self.campaign_id, "contaminating", leaked, day_index)
-        return np.concatenate([self._parent._treated, leaked])
+        return np.concatenate([self._parent.treated, leaked])
 
 
 class WinBackCampaign(EmailCampaign):
