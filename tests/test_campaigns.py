@@ -125,6 +125,14 @@ class AnswerKeyTest(unittest.TestCase):
             self.assertGreater(cost, f.value_per_incremental_customer, f.campaign_id)
             self.assertGreater(f.spend, 0)
 
+    def test_more_customers_get_twelve_or_more_holiday_sends_in_2025_than_in_2026(self):
+        sends = self.t.engagement_events[self.t.engagement_events["event_type"] == "send"]
+        shares = []
+        for year in (2025, 2026):
+            window = sends[(sends["event_ts"] >= f"{year}-11-01") & (sends["event_ts"] < f"{year + 1}-01-01")]
+            shares.append((window.groupby("customer_id").size() >= 12).mean())
+        self.assertGreater(shares[0], shares[1] + 0.08, shares)
+
     def test_credited_purchases_name_real_campaigns(self):
         known = set(self.t.campaigns["campaign_id"])
         credited = set(self.t.orders["campaign_credit"].dropna()) | set(self.t.pos_lines["campaign_credit"].dropna())

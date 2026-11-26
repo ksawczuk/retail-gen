@@ -114,6 +114,7 @@ def build_demand(cfg, rng, customers, products, categories, specs=()):
     ctx = CampaignContext(rng, days, customers["created_at"].to_numpy().astype("datetime64[ns]"),
                           customers["marketing_opt_in"].to_numpy(bool),
                           customers["loyalty_join_at"].to_numpy().astype("datetime64[ns]"), lifecycle,
+                          activity=customers["activity"].to_numpy(float),
                           post_unsubscribe_left=cfg.count(POST_UNSUBSCRIBE_SENDS))
     modifiers = email_campaigns(specs, ctx)
     engine = DemandEngine(rng, days, customers["created_at"], customers["activity"], lifecycle, seasons, modifiers)

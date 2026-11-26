@@ -10,7 +10,7 @@ import pandas as pd
 from .campaigns import CANVAS_LIFT, utm_tag
 
 
-LIFT_KINDS = ("seasonal", "newsletter", "reminder", "canvas")
+LIFT_KINDS = ("seasonal", "early_access", "newsletter", "reminder", "canvas")
 HOLDOUT_REDEMPTION_SHARE = 0.03
 OUTSIDE_REDEMPTION_SHARE = 0.06
 SPEND_FLOOR_PER_CUSTOMER = 50.0
@@ -117,6 +117,7 @@ def truth_table(rng, specs, ctx, signup, purchases, days, customer_ids, orders, 
                 lo = send_day[s.campaign_id][0] + s.window_days
                 after = (day_idx >= lo) & (day_idx < lo + s.pullback_days) & by_treated
                 row["pullback_purchases_lost"] = int(round(after.sum() * s.pullback / (1 - s.pullback)))
+                row["net_lift"] = (incremental - row["pullback_purchases_lost"]) / base if base > 0 else np.nan
         elif s.kind == "winback":
             row["incremental_comebacks"] = ctx.reactivations.get(s.campaign_id, 0)
         elif s.kind == "gain_loyalty":

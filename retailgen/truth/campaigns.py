@@ -31,6 +31,8 @@ WINBACK_DAYS = 30
 PROSPECT_PULL = 0.15
 PROSPECT_EXTRA = 0.04
 PROSPECT_REACH_DAYS = 60
+EARLY_ACCESS_SHARE_2025 = 0.26
+EARLY_ACCESS_SHARE_2026 = 0.19
 
 
 @dataclass(frozen=True)
@@ -62,6 +64,7 @@ class CampaignSpec:
     categories: tuple = ()
     flight_days: int = 0
     adds_customers: bool = False
+    audience_share: float = 1.0
 
 
 def _seasonal(cid, name, sends, lift, window, half_life, holdout="none", code=None, leaks=False, pullback=0.0,
@@ -106,11 +109,11 @@ def calendar():
         _seasonal("CMP-11", "TAKE20 February 2026", ["2026-02-02", "2026-02-13"], 0.12, 28, 28.0,
                   holdout="contaminated", code="TAKE20-26", pullback=0.12),
         _seasonal("CMP-12", "Spring 2026", ["2026-03-15", "2026-03-20"], 0.06, 14, 14.0, code="SPRING26",
-                  pullback=0.10),
+                  pullback=0.045),
         _seasonal("CMP-13", "Mother's Day 2026", ["2026-04-30", "2026-05-05"], 0.25, 10, 4.0, holdout="clean",
                   categories=("Decor", "Kitchen", "Bedding", "Tops")),
         _seasonal("CMP-14", "May-June 2026", ["2026-05-15", "2026-05-28"], 0.05, 14, 7.0, code="SAVE10-26",
-                  pullback=0.07),
+                  pullback=0.033),
         _seasonal("CMP-15", "Father's Day 2026", ["2026-06-11", "2026-06-16"], 0.25, 10, 4.0, holdout="clean",
                   categories=("Camping", "Cycling", "Audio", "Sneakers")),
         _seasonal("CMP-16", "Summer 2026 outerwear", ["2026-07-01", "2026-07-08"], 0.01, 14, 14.0,
@@ -120,10 +123,19 @@ def calendar():
         _seasonal("CMP-18", "Halloween 2026", ["2026-10-24", "2026-10-28"], 0.10, 7, 7.0, code="HALLOWEEN26"),
         _seasonal("CMP-19", "Black Friday 2026", ["2026-11-20", Send("2026-11-25", 0.15)], 0.30, 5, 2.0,
                   holdout="clean", code="BFRIDAY26"),
-        _seasonal("CMP-20", "Holiday gift guide 2026", ["2026-11-28", "2026-12-03"], 0.10, 7, 7.0, code="GIFT26"),
-        _seasonal("CMP-21", "Boxing Day 2026", ["2026-12-26", "2026-12-29"], 0.12, 7, 7.0, holdout="clean",
-                  code="BOXING26"),
+        _seasonal("CMP-20", "Holiday gift guide 2026", ["2026-11-28"], 0.10, 7, 7.0, code="GIFT26"),
+        _seasonal("CMP-21", "Boxing Day 2026", ["2026-12-26"], 0.12, 7, 7.0, holdout="clean", code="BOXING26"),
     ]
+
+    # Holiday early access to the most active part of the audience
+    c.append(CampaignSpec("CMP-H1", "Holiday early access 2025",
+                          "early_access", tuple(Send(d, 0.02) for d in ["2025-11-03", "2025-11-10", "2025-11-17",
+                                                                        "2025-11-21", "2025-12-01", "2025-12-08"]),
+                          7, 3.0, audience_share=EARLY_ACCESS_SHARE_2025))
+    c.append(CampaignSpec("CMP-H2", "Holiday early access 2026",
+                          "early_access", tuple(Send(d, 0.02) for d in ["2026-11-02", "2026-11-16", "2026-12-07",
+                                                                        "2026-12-14"]),
+                          7, 3.0, audience_share=EARLY_ACCESS_SHARE_2026))
 
     # The contaminated campaigns' reminders, sent to the treated and part of the holdout
     for parent in [x for x in c if x.holdout == "contaminated"]:
@@ -188,6 +200,7 @@ class CampaignContext:
     opted_in: np.ndarray
     joined_at: np.ndarray
     lifecycle: object
+    activity: np.ndarray = None
     unsubscribed: np.ndarray = None
     post_unsubscribe_left: int = POST_UNSUBSCRIBE_SENDS
     sends: list = field(default_factory=list)
@@ -336,6 +349,19 @@ class SeasonalCampaign(EmailCampaign):
     """A seasonal promotion to every opted-in customer."""
 
 
+class EarlyAccessCampaign(EmailCampaign):
+    """Holiday early access: every send goes to the most active share of the opted-in audience."""
+
+    def eligible(self, day_index, state):
+        """The reachable customers in the top `audience_share` by activity."""
+        reachable = np.flatnonzero(self._ctx.reachable(day_index))
+        if not len(reachable):
+            return reachable
+        activity = self._ctx.activity[reachable]
+        cut = np.quantile(activity, 1.0 - self.spec.audience_share)
+        return reachable[activity >= cut]
+
+
 class NewsletterCampaign(EmailCampaign):
     """The monthly newsletter: a fresh audience of opted-in members at every send, no holdout."""
 
@@ -439,6 +465,7 @@ class CanvasCampaign(EmailCampaign):
 
 EMAIL_KINDS = {
     "seasonal": lambda spec, ctx, by_id: SeasonalCampaign(spec, ctx),
+    "early_access": lambda spec, ctx, by_id: EarlyAccessCampaign(spec, ctx),
     "newsletter": lambda spec, ctx, by_id: NewsletterCampaign(spec, ctx),
     "reminder": lambda spec, ctx, by_id: ReminderCampaign(spec, ctx, by_id[spec.parent]),
     "winback": lambda spec, ctx, by_id: WinBackCampaign(spec, ctx),
