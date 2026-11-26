@@ -1,34 +1,21 @@
-"""The command line: wires the parts together and returns the exit code (0 sent, 1 some failed, 2 bad input).
+"""The command line: picks the command, runs it and returns the exit code (0 done, 1 some files failed, 2 bad input).
 
 Called by `python -m pusher`; this is where the concrete classes are chosen.
 """
 
-from pusher.config import PushConfig
-from pusher.connectors import DirectConnector, TunnelConnector
+from pusher.commands import RunContext, parse_command
 from pusher.errors import InputError
-from pusher.mode import Mode
-from pusher.planner import FilePlanner
-from pusher.pusher import Pusher
 from pusher.send_log import SendLog
 from pusher.volume_client import FilesApiClient
 
 
 def main(argv, env, out, client_factory=FilesApiClient):
-    """Run one push from the command-line words and environment, writing the log to `out`."""
+    """Run one command from the command-line words and environment, writing the log to `out`."""
     log = SendLog(out)
-    # Read the mode, the settings and the file list; any bad input stops here with exit 2
+    # Parse and run the command; any bad input stops with exit 2
     try:
-        mode = Mode.parse(list(argv))
-        config = PushConfig.from_env(env)
-        items = FilePlanner(config.landing_root).plan(mode)
+        command = parse_command(argv)
+        return command.run(RunContext(env=env, log=log, client_factory=client_factory))
     except InputError as exc:
         log.error(str(exc))
         return 2
-    # Tunnel through the proxy when HTTPS_PROXY is set, otherwise connect directly
-    connector = TunnelConnector(config.proxy) if config.proxy else DirectConnector()
-    # A dry run has no client, so it makes no network call
-    client = None if config.dry_run else client_factory(config.host, config.token, connector)
-    # Send the files and report
-    result = Pusher(client, log, dry_run=config.dry_run).run(items, mode.delivery_label())
-    log.summary(result)
-    return result.exit_code
