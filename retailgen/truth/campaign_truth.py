@@ -104,7 +104,7 @@ def truth_table(rng, specs, ctx, signup, purchases, days, customer_ids, orders, 
             incremental = int((credit == s.campaign_id).sum())
             by_treated = buyer.isin(g.get("treated", set())).to_numpy()
             if s.kind == "canvas" or s.kind == "newsletter":
-                window_buys = incremental
+                window_buys = _per_send_window_purchases(ctx, s, day_idx, cust)
             else:
                 lo, hi = send_day[s.campaign_id][0], send_day[s.campaign_id][-1] + s.window_days
                 in_window = (day_idx >= lo) & (day_idx < hi) & by_treated
@@ -135,6 +135,30 @@ def truth_table(rng, specs, ctx, signup, purchases, days, customer_ids, orders, 
     idle = flights & (table["incremental_customers"] == 0)
     table.loc[idle, "spend"] = np.round(typical * rng.uniform(0.6, 1.2, int(idle.sum())), 2)
     return table
+
+
+def _per_send_window_purchases(ctx, spec, day_idx, cust):
+    """Purchases by each recipient inside their own send's window, for campaigns that send to a new audience each
+    time; a window ends early where the same customer's next send begins, so no purchase counts twice."""
+    starts = [(idx, np.full(len(idx), day)) for cid, group, idx, day in ctx.assignments
+              if cid == spec.campaign_id and group == "treated" and len(idx)]
+    if not starts:
+        return 0
+    who = np.concatenate([i for i, _ in starts]).astype(np.int64)
+    when = np.concatenate([d for _, d in starts]).astype(np.int64)
+
+    # Each window runs to the window length or to the customer's next send, whichever is first
+    order = np.lexsort((when, who))
+    who, when = who[order], when[order]
+    nxt = np.where(np.r_[who[1:] == who[:-1], False], np.r_[when[1:], 0], when + spec.window_days)
+    end = np.minimum(when + spec.window_days, nxt)
+
+    # Count purchases per (customer, day range) with one sorted key
+    known = cust >= 0
+    keys = np.sort(cust[known].astype(np.int64) * 100_000 + day_idx[known].astype(np.int64))
+    lo = np.searchsorted(keys, who * 100_000 + when, side="left")
+    hi = np.searchsorted(keys, who * 100_000 + end, side="left")
+    return int((hi - lo).sum())
 
 
 def _fatigue_by_campaign(ctx):

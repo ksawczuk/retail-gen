@@ -133,6 +133,14 @@ class AnswerKeyTest(unittest.TestCase):
             shares.append((window.groupby("customer_id").size() >= 12).mean())
         self.assertGreater(shares[0], shares[1] + 0.08, shares)
 
+    def test_newsletter_and_canvas_have_a_measured_lift(self):
+        """Their window purchases count each recipient's own send window, so the realized lift has a size."""
+        truth = self.t.campaign_truth.set_index("campaign_id")
+        for campaign_id in ("CMP-NL", "CMP-CV"):
+            row = truth.loc[campaign_id]
+            self.assertGreater(row["treated_window_purchases"], row["incremental_purchases"], campaign_id)
+            self.assertTrue(np.isfinite(row["realized_lift"]), campaign_id)
+
     def test_credited_purchases_name_real_campaigns(self):
         known = set(self.t.campaigns["campaign_id"])
         credited = set(self.t.orders["campaign_credit"].dropna()) | set(self.t.pos_lines["campaign_credit"].dropna())
