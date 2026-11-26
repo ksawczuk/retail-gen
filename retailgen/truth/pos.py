@@ -9,7 +9,7 @@ from .demand import Channel
 
 NS = "datetime64[ns]"
 STORE_HOURS = [0] * 9 + [2, 3, 4, 5, 5, 5, 5, 5, 5, 4, 3, 2, 0, 0, 0]
-SCAN_RATE = 0.8
+SCAN_RATE = 0.73
 STORE_EXTRA_LINES = 0.7
 STORE_QTY_RATE = 0.18
 
@@ -55,12 +55,13 @@ def generate_pos(cfg, rng, stores, store_events, customers, price_history, promo
                         "tender_type": rng.choice(["debit", "credit", "cash", "gift_card"], size=n, p=[.4, .45, .1, .05])})
     txn["cashier_id"] = [f"E{s}{k:02d}" for s, k in zip(txn["store_id"], rng.integers(1, 13, n))]
 
-    # A few transactions are staff buying with their discount, always scanned
+    # A few transactions are staff buying with their discount, always scanned: staff signed up before that day
     staff = np.flatnonzero(customers["is_employee"].to_numpy())
-    emp = (rng.random(n) < 0.01) & (len(staff) > 0)
+    hired = np.searchsorted(customers["created_at"].to_numpy().astype(NS)[staff], tday, side="left")
+    emp = (rng.random(n) < 0.01) & (hired > 0)
     if emp.any():
         cust_idx = cust_idx.copy()
-        cust_idx[emp] = staff[rng.integers(0, len(staff), int(emp.sum()))]
+        cust_idx[emp] = staff[(rng.random(int(emp.sum())) * hired[emp]).astype(int)]
     txn["employee_sale"] = emp
 
     # The true customer, and the card scan that shows them: only members who had joined by then
