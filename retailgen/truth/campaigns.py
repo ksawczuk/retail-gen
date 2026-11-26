@@ -23,6 +23,7 @@ FATIGUED_SENDS = 10
 NO_CONSENT_SHARE = 0.015
 POST_UNSUBSCRIBE_SENDS = 300
 CANVAS_DELAY_DAYS = 5
+CANVAS_LIFT = 0.12
 GAIN_LOYALTY_POINTS = 0.05
 GAIN_LOYALTY_DAYS = 14
 WINBACK_DAYS = 30
@@ -420,7 +421,7 @@ class CanvasCampaign(EmailCampaign):
         active = (age >= 0) & (age < self.spec.window_days)
         if not active.any():
             return None
-        return np.where(active, 0.12 * 0.5 ** (age / self.spec.half_life), 0.0)
+        return np.where(active, CANVAS_LIFT * 0.5 ** (age / self.spec.half_life), 0.0)
 
 
 EMAIL_KINDS = {

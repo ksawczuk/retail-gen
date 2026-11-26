@@ -64,7 +64,7 @@ def generate_online(cfg, rng, customers, addresses, price_history, promos, fx, d
 
     # Lines: the customer's categories in season, SKUs launched by the order time
     lines = baskets.lines(rng, ts, day_idx, cust_idx, extra_lines=ONLINE_EXTRA_LINES, qty_rate=ONLINE_QTY_RATE,
-                          qty_max=4, local_items=False).rename(columns={"row": "oi"})
+                          qty_max=4, local_items=False, campaign=credit).rename(columns={"row": "oi"})
     lines["order_id"] = orders["order_id"].to_numpy()[lines["oi"]]
     lines["line_no"] = lines.groupby("oi").cumcount() + 1
     lines = lines[["oi", "sku", "order_id", "line_no", "qty"]]

@@ -112,7 +112,9 @@ def build_demand(cfg, rng, customers, products, categories, specs=()):
                           customers["loyalty_join_at"].to_numpy().astype("datetime64[ns]"), lifecycle)
     modifiers = email_campaigns(specs, ctx)
     engine = DemandEngine(rng, days, customers["created_at"], customers["activity"], lifecycle, seasons, modifiers)
-    baskets = BasketBuilder(products, seasons, lifecycle.preferences, lifecycle.basket_mult)
+    promoted = {s.campaign_id: s.categories for s in specs if s.categories}
+    cross_sell = [s.campaign_id for s in specs if s.kind == "canvas"]
+    baskets = BasketBuilder(products, seasons, lifecycle.preferences, lifecycle.basket_mult, promoted, cross_sell)
     return engine, baskets, ctx
 
 

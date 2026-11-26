@@ -90,3 +90,8 @@ Scenarios the generator handles on purpose, and why. One entry per case; code co
 - **GEN-16 Gain-loyalty emails are sent before the engine.** They change join dates, which the engine and the card
   scan need, so they run on the customers first; their sends count in the email events but not in fatigue or
   unsubscribes.
+- **GEN-17 A purchase a campaign caused leans to the campaign's categories.** For a purchase the engine credits to a
+  campaign with promoted categories (Mother's Day, Father's Day, Fall, Summer 2026 Outerwear), those categories weigh
+  three times as much when its lines are picked; for the Canvas, the customer's second-favorite category weighs 1.5
+  times. Purchases no campaign caused are untouched, so the baseline mix stays as it was. A category promoted out of
+  season (Outerwear in July) still has its low season weight, so the campaign moves little.

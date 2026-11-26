@@ -3,7 +3,9 @@
 Builds the truth at scale 0.1 for seeds 1, 2 and 3 (about a minute). For each of the four gifting campaigns with a
 clean holdout (Mother's Day and Father's Day, 2025 and 2026), the measured lift is the treated customers' purchases in
 the window over their purchases in the 90 days before, divided by the same ratio for the holdout, minus one. The 12
-measured lifts are averaged and must land within 0.08 of the average realized lift in campaign_truth.
+measured lifts are averaged and must land within 0.06 (about two standard errors) of the average realized lift in
+campaign_truth. Negative control: the same estimator on a placebo window, 60 days before each send, when the campaign
+had not been sent, must come out within 0.06 of zero and below the gifting estimate.
 """
 import unittest
 
@@ -15,8 +17,9 @@ from retailgen.truth import build_truth
 
 CAMPAIGNS = ("CMP-03", "CMP-05", "CMP-13", "CMP-15")
 SEEDS = (1, 2, 3)
-TOLERANCE = 0.08
+TOLERANCE = 0.06
 PRE_DAYS = 90
+PLACEBO_SHIFT_DAYS = 60
 
 
 def purchases(t):
@@ -28,12 +31,14 @@ def purchases(t):
     ]).dropna()
 
 
-def measured_lift(t, buys, campaign_id):
-    """Treated over holdout, each as window purchases over pre-period purchases, minus one."""
+def measured_lift(t, buys, campaign_id, shift_days=0):
+    """Treated over holdout, each as window purchases over pre-period purchases, minus one; `shift_days` moves the
+    window earlier for the placebo."""
     spec = t.campaigns.set_index("campaign_id").loc[campaign_id]
     sends = spec["sends"].split(",")
-    start = pd.Timestamp(sends[0])
-    end = pd.Timestamp(sends[-1]) + pd.Timedelta(days=int(spec["window_days"]))
+    shift = pd.Timedelta(days=shift_days)
+    start = pd.Timestamp(sends[0]) - shift
+    end = pd.Timestamp(sends[-1]) + pd.Timedelta(days=int(spec["window_days"])) - shift
     a = t.campaign_assignment[t.campaign_assignment["campaign_id"] == campaign_id]
 
     # Purchases per group in the window and in the 90 days before
@@ -49,18 +54,28 @@ def measured_lift(t, buys, campaign_id):
 
 class LiftRecoveryTest(unittest.TestCase):
 
-    def test_holdout_comparison_recovers_the_realized_lift(self):
-        measured, realized = [], []
+    @classmethod
+    def setUpClass(cls):
+        """Build the three seeds once and measure the gifting campaigns and their placebo windows."""
+        cls.measured, cls.placebo, cls.realized = [], [], []
         for seed in SEEDS:
             cfg = Config(scale=0.1, seed=seed)
             t = build_truth(cfg, np.random.default_rng(seed), log=lambda *a: None)
             buys = purchases(t)
             truth = t.campaign_truth.set_index("campaign_id")["realized_lift"]
             for campaign_id in CAMPAIGNS:
-                measured.append(measured_lift(t, buys, campaign_id))
-                realized.append(truth[campaign_id])
-        gap = abs(np.mean(measured) - np.mean(realized))
-        self.assertLess(gap, TOLERANCE, f"measured {np.mean(measured):.3f}, realized {np.mean(realized):.3f}")
+                cls.measured.append(measured_lift(t, buys, campaign_id))
+                cls.placebo.append(measured_lift(t, buys, campaign_id, PLACEBO_SHIFT_DAYS))
+                cls.realized.append(truth[campaign_id])
+
+    def test_holdout_comparison_recovers_the_realized_lift(self):
+        gap = abs(np.mean(self.measured) - np.mean(self.realized))
+        self.assertLess(gap, TOLERANCE, f"measured {np.mean(self.measured):.3f}, realized {np.mean(self.realized):.3f}")
+
+    def test_negative_control_finds_no_lift_before_the_send(self):
+        placebo = np.mean(self.placebo)
+        self.assertLess(abs(placebo), TOLERANCE, f"placebo {placebo:.3f}")
+        self.assertLess(placebo, np.mean(self.measured), f"placebo {placebo:.3f}, measured {np.mean(self.measured):.3f}")
 
 
 if __name__ == "__main__":

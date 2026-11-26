@@ -7,6 +7,8 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from .campaigns import CANVAS_LIFT
+
 
 LIFT_KINDS = ("seasonal", "newsletter", "reminder", "canvas")
 HOLDOUT_REDEMPTION_SHARE = 0.03
@@ -87,7 +89,8 @@ def truth_table(rng, specs, ctx, signup, purchases, days, customer_ids, orders, 
 
     rows = []
     for s in specs:
-        row = {"campaign_id": s.campaign_id, "kind": s.kind}
+        row = {"campaign_id": s.campaign_id, "kind": s.kind,
+               "nominal_lift": s.sends[0].lift if s.sends else CANVAS_LIFT}
         g = groups.get(s.campaign_id, {})
         row["treated_customers"] = len(g.get("treated", set()))
         row["holdout_customers"] = len(g.get("holdout", set()) | g.get("holdout_contaminated", set()))

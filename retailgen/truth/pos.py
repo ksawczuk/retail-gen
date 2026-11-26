@@ -77,7 +77,8 @@ def generate_pos(cfg, rng, stores, store_events, customers, price_history, promo
 
     # Lines: the customer's categories in season, SKUs launched by then, sometimes a store-local item
     lines = baskets.lines(rng, txn["local_ts"].to_numpy(), day_idx, cust_idx, extra_lines=STORE_EXTRA_LINES,
-                          qty_rate=STORE_QTY_RATE, qty_max=3, local_items=True).rename(columns={"row": "ti"})
+                          qty_rate=STORE_QTY_RATE, qty_max=3, local_items=True,
+                          campaign=txn["campaign_credit"].to_numpy()).rename(columns={"row": "ti"})
     lines = lines.merge(txn, left_on="ti", right_index=True)
     lines = _price_lines(cfg, rng, lines, stores, price_history, promos, fx)
     lines["orig_txn_ref"] = None

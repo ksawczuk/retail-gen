@@ -73,8 +73,9 @@ validate.py                               re-reads the files; does not import re
   largest in full, others damped), raises the day's total accordingly, and marks a
   purchase above a customer's baseline as caused by the campaign. Gain-loyalty emails and
   paid flights act before the engine, on join dates and signups (`truth/signups.py`).
-  The answer key's `campaign_truth.parquet` holds what each campaign truly did, counted
-  from those marks.
+  A purchase a campaign caused leans to the campaign's promoted categories when its lines
+  are picked. The answer key's `campaign_truth.parquet` holds what each campaign truly
+  did, counted from those marks, with each campaign's nominal and realized lift.
 - **What the store sees.** Every store basket has a true customer
   (`true_customer_id` in the truth). The POS shows `customer_id` only when a loyalty
   member who had already joined scans their card, about 40% of baskets.

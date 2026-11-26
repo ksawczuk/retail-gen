@@ -8,15 +8,19 @@ import pandas as pd
 from ..util import bounded_weighted_pick
 
 NS = "datetime64[ns]"
+CAMPAIGN_TILT = 3.0
+CROSS_SELL_TILT = 1.5
 
 
 class BasketBuilder:
     """Draws basket lines from each customer's category taste, the category seasonality and SKU popularity."""
 
-    def __init__(self, products, seasonality, preferences, basket_mult):
-        """Keep the catalogue grouped by category, the seasonality, and the per-customer preference matrix and
-        basket multipliers (rows in the customers' order)."""
+    def __init__(self, products, seasonality, preferences, basket_mult, campaign_categories=None, cross_sell=()):
+        """Keep the catalogue grouped by category, the seasonality, the per-customer preference matrix and basket
+        multipliers (rows in the customers' order), and the categories each campaign promotes."""
         self._seasonality = seasonality
+        self._tilts = self._tilt_rows(campaign_categories or {}, seasonality.category_names)
+        self._cross_sell = set(cross_sell)
         self._preferences = preferences
         self._basket_mult = basket_mult
         self._names = seasonality.category_names
@@ -34,9 +38,9 @@ class BasketBuilder:
         customer_index = np.asarray(customer_index)
         return np.where(customer_index >= 0, self._basket_mult[np.maximum(customer_index, 0)], 1.0)
 
-    def lines(self, rng, ts, day_index, customer_index, extra_lines, qty_rate, qty_max, local_items):
-        """Return a DataFrame of (row, sku, qty) for purchases at times `ts`, one or more lines each.
-        `row` points back to the purchase; duplicate SKUs in a basket are dropped."""
+    def lines(self, rng, ts, day_index, customer_index, extra_lines, qty_rate, qty_max, local_items, campaign=None):
+        """Return a DataFrame of (row, sku, qty) for purchases at times `ts`, one or more lines each; a purchase a
+        campaign caused leans to that campaign's categories. `row` points back to the purchase."""
         ts = np.asarray(ts).astype(NS)
         day_index = np.asarray(day_index)
         mult = self.basket_multipliers(customer_index)
@@ -47,7 +51,8 @@ class BasketBuilder:
         line_ts = ts[row]
 
         # Choose a category per line from the customer's taste times that day's category season
-        category = self._categories(rng, np.asarray(customer_index)[row], day_index[row])
+        cause = np.full(len(ts), None, dtype=object) if campaign is None else np.asarray(campaign, dtype=object)
+        category = self._categories(rng, np.asarray(customer_index)[row], day_index[row], cause[row])
 
         # Choose the SKU within the category, among those launched by then
         sku = np.empty(len(row), dtype=object)
@@ -67,16 +72,40 @@ class BasketBuilder:
         lines = pd.DataFrame({"row": row, "sku": sku, "qty": qty})
         return lines.drop_duplicates(["row", "sku"]).reset_index(drop=True)
 
-    def _categories(self, rng, customer_index, day_index, chunk=200_000):
+    def _categories(self, rng, customer_index, day_index, cause, chunk=200_000):
         """Draw a category position per line, in chunks so the line-by-category matrices stay small."""
         out = np.empty(len(customer_index), dtype=int)
         for start in range(0, len(customer_index), chunk):
             cust = customer_index[start:start + chunk]
             taste = np.where((cust >= 0)[:, None], self._preferences[np.maximum(cust, 0)], self._uniform)
-            cumulative = np.cumsum(taste * self._seasonality.category(day_index[start:start + chunk]), axis=1)
+            weights = taste * self._seasonality.category(day_index[start:start + chunk])
+            weights = weights * self._tilt(cause[start:start + chunk], taste)
+            cumulative = np.cumsum(weights, axis=1)
             draw = rng.random(len(cust)) * cumulative[:, -1]
             out[start:start + chunk] = (cumulative < draw[:, None]).sum(axis=1)
         return out
+
+    def _tilt(self, cause, taste):
+        """Per line, the category multipliers of the campaign that caused the purchase: its promoted categories,
+        or for a cross-sell campaign the customer's second-favorite category. 1 where no campaign caused it."""
+        tilt = np.ones_like(taste)
+        for campaign_id in set(cause[cause != None]):  # noqa: E711
+            rows = np.flatnonzero(cause == campaign_id)
+            if campaign_id in self._tilts:
+                tilt[rows] = self._tilts[campaign_id]
+            elif campaign_id in self._cross_sell:
+                second = np.argsort(-taste[rows], axis=1)[:, 1]
+                tilt[rows, second] = CROSS_SELL_TILT
+        return tilt
+
+    @staticmethod
+    def _tilt_rows(campaign_categories, names):
+        """{campaign_id: multiplier per category}, CAMPAIGN_TILT on the campaign's categories."""
+        rows = {}
+        for campaign_id, categories in campaign_categories.items():
+            if categories:
+                rows[campaign_id] = np.array([CAMPAIGN_TILT if n in categories else 1.0 for n in names])
+        return rows
 
     def _pick_launched(self, rng, group, ts):
         """Pick a SKU per time from a launch-ordered group by popularity; before the group's first launch,

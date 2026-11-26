@@ -27,10 +27,12 @@ def products():
 
 
 def builder(preferences, basket_mult=None):
-    """A BasketBuilder over the test products, with the given per-customer preferences."""
+    """A BasketBuilder over the test products, with the given per-customer preferences; campaign PROMO promotes
+    Camping and campaign CANVAS cross-sells."""
     n = len(preferences)
     mult = np.ones(n) if basket_mult is None else basket_mult
-    return BasketBuilder(products(), Seasonality(DAYS, NAMES), np.asarray(preferences, float), mult)
+    return BasketBuilder(products(), Seasonality(DAYS, NAMES), np.asarray(preferences, float), mult,
+                         {"PROMO": ("Camping",)}, ["CANVAS"])
 
 
 def purchases(n, when="2025-03-01"):
@@ -79,6 +81,24 @@ class BasketTest(unittest.TestCase):
         self.assertGreater(len(big), len(small))
         self.assertGreater(big["qty"].mean(), small["qty"].mean())
         self.assertLessEqual(big["qty"].max(), 4)
+
+    def test_a_purchase_a_campaign_caused_leans_to_its_categories(self):
+        """Even taste in March gives Camping 1.5 / 2.5; caused by PROMO (Camping x3) it gets 4.5 / 5.5."""
+        ts, day = purchases(4000)
+        args = dict(extra_lines=0.0, qty_rate=0.0, qty_max=1, local_items=False)
+        plain = builder([[0.5, 0.5]]).lines(np.random.default_rng(7), ts, day, np.zeros(4000, int), **args)
+        caused = builder([[0.5, 0.5]]).lines(np.random.default_rng(7), ts, day, np.zeros(4000, int),
+                                             campaign=np.full(4000, "PROMO", dtype=object), **args)
+        self.assertAlmostEqual(plain["sku"].str.startswith("2").mean(), 1.5 / 2.5, delta=0.03)
+        self.assertAlmostEqual(caused["sku"].str.startswith("2").mean(), 4.5 / 5.5, delta=0.03)
+
+    def test_a_cross_sell_purchase_leans_to_the_second_favorite_category(self):
+        """Taste 0.7 Tops, 0.3 Camping in March: Camping 0.45 / 1.15 plain, 0.675 / 1.375 when cross-sold."""
+        ts, day = purchases(4000)
+        args = dict(extra_lines=0.0, qty_rate=0.0, qty_max=1, local_items=False)
+        caused = builder([[0.7, 0.3]]).lines(np.random.default_rng(8), ts, day, np.zeros(4000, int),
+                                             campaign=np.full(4000, "CANVAS", dtype=object), **args)
+        self.assertAlmostEqual(caused["sku"].str.startswith("2").mean(), 0.675 / 1.375, delta=0.03)
 
     def test_no_sku_twice_in_one_basket(self):
         ts, day = purchases(1000)
