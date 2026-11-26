@@ -12,9 +12,10 @@ from .common import by_month, make_late, route
 SRC = "braze"
 EVENT_FILES = {"send": "sends", "delivery": "deliveries", "bounce": "bounces", "open": "opens", "click": "clicks",
                "unsubscribe": "unsubscribes"}
-MACHINE_OPEN_FROM = pd.Timestamp("2026-03-10")
+# Schema changes start on a month's first day: each monthly history file has one schema
+MACHINE_OPEN_FROM = pd.Timestamp("2026-03-01")
 LINK_ALIAS_FROM = pd.Timestamp("2026-06-01")
-SEND_RENAME_FROM = pd.Timestamp("2026-07-15")
+SEND_RENAME_FROM = pd.Timestamp("2026-07-01")
 ANONYMOUS_SHARE = 0.08
 IDENTIFIED_LATER = 0.70
 EMAIL_ID_SHARE = 0.10

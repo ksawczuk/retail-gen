@@ -92,6 +92,21 @@ class MarketingSourcesTest(unittest.TestCase):
         self.assertTrue(any("dispatch_id" in c for _, c in fields["braze_sends"]))
         self.assertTrue(any("send_id" in c for _, c in fields["braze_sends"]))
 
+    def test_every_record_in_a_file_is_on_the_side_of_its_schema_date(self):
+        ms = lambda d: int(pd.Timestamp(d).value // 10**6)  # noqa: E731
+        changes = {"braze_opens": ("machine_open", braze.MACHINE_OPEN_FROM),
+                   "braze_clicks": ("link_alias", braze.LINK_ALIAS_FROM),
+                   "braze_sends": ("dispatch_id", braze.SEND_RENAME_FROM)}
+        for name, cols, records in self.writer.writes:
+            if name not in changes or not records:
+                continue
+            column, day = changes[name]
+            times = [r["time"] for r in records]
+            if column in cols:
+                self.assertGreaterEqual(min(times), ms(day), (name, column))
+            else:
+                self.assertLess(max(times), ms(day), (name, column))
+
     def test_anonymous_events_have_no_external_id(self):
         sends = [r for name, _, recs in self.writer.writes if name == "braze_sends" for r in recs]
         missing = sum(r["external_user_id"] is None for r in sends)
