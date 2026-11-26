@@ -103,3 +103,6 @@ Scenarios the generator handles on purpose, and why. One entry per case; code co
   customer's first signed-in session carries the agency source and the flight's tag.
 - **GEN-21 Email unsubscribes reach the CRM opt-in through a sync table.** `consent_sync` in the answer key holds
   when each unsubscribe reached the CRM; the cut-over extract and the change feed take the opt-in from it.
+- **GEN-23 The line-ending scan skips binary files.** `validate.py` looks for CRLF endings and a BOM in text files
+  only. Parquet and Avro files are skipped, because compressed binary bytes can hold the pair CR LF by chance, which
+  is not a line ending. The suffixes are in `BINARY_SUFFIXES`; the test is `tests/test_validate_line_endings.py`.

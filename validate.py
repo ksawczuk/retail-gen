@@ -19,6 +19,8 @@ import pyarrow.parquet as pq
 
 results = []
 
+BINARY_SUFFIXES = {".parquet", ".avro"}
+
 
 def check(name, ok, detail=""):
     results.append(ok)
@@ -129,6 +131,24 @@ def braze_checks(stage, cnt, cut_off, read_records=None):
           f"{dups} vs {cnt('braze.duplicate_events')}")
 
 
+def text_file_findings(stage):
+    """Return the names of text files that hold CRLF line endings and of those that start with a BOM.
+    Called by main for the line-ending checks."""
+    crlf, boms = [], []
+    for p in stage.rglob("*"):
+        # Skip folders and binary files
+        if not p.is_file() or p.suffix in BINARY_SUFFIXES:
+            continue
+
+        # Look for CRLF line endings and a BOM
+        data = read_gz(p) if p.suffix == ".gz" else p.read_bytes()
+        if b"\r\n" in data:
+            crlf.append(p.name)
+        if data.startswith(b"\xef\xbb\xbf"):
+            boms.append(p.name)
+    return crlf, boms
+
+
 def main(out):
     out = Path(out)
     stage = out / "landing_staging"
@@ -144,15 +164,7 @@ def main(out):
     check("manifest lists exactly the files on disk", on_disk == set(man["files"]),
           f"{len(on_disk)} on disk, {len(man['files'])} listed")
 
-    crlf, boms = [], []
-    for p in stage.rglob("*"):
-        if not p.is_file() or p.suffix == ".parquet":
-            continue
-        data = read_gz(p) if p.suffix == ".gz" else p.read_bytes()
-        if b"\r\n" in data:
-            crlf.append(p.name)
-        if data.startswith(b"\xef\xbb\xbf"):
-            boms.append(p.name)
+    crlf, boms = text_file_findings(stage)
     check("no CRLF line endings anywhere", not crlf, ", ".join(crlf[:3]))
     check("only the CRM full extract has a BOM", boms == ["customers_full_20260930.csv"], str(boms))
 
