@@ -35,7 +35,8 @@ Scenarios the generator handles on purpose, and why. One entry per case; code co
 - **PSH-01 `next` records a day only after a clean push.** A day goes into the state file only when every file was
   sent or skipped; with any failed file the run exits 1 and records nothing, so the next run pushes the same day again
   (files already in the volume with the same size are skipped). A dry run records nothing either. The state file is
-  replaced through a temporary file and a rename, so a crash leaves the old or the new list, never a partial one.
+  written to a temporary file, flushed and synced to disk, then renamed over the old one, so a crash or power cut
+  leaves the old or the new list, never an empty or partial one.
 - **PSH-02 Only the newest pushed day can be unmarked.** The pushed days must stay an unbroken run from the first
   increment day, because the daily load in bronze refuses a day whose earlier days are not complete. Removing an older
   day while a later one stays recorded would leave a gap that `next` fills out of order, so `unmark` refuses it and

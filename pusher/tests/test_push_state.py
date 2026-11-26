@@ -1,9 +1,11 @@
 """Unit tests for pusher.push_state: reading, checking, recording and unmarking pushed days, and the lock."""
 
+import os
 import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
+from unittest import mock
 
 from pusher.errors import InputError
 from pusher.push_state import PushState
@@ -45,6 +47,26 @@ class PushStateTest(unittest.TestCase):
     def test_write_leaves_no_temporary_file(self):
         self._state().record(DAYS[0], DAYS)
         self.assertEqual(sorted(p.name for p in self.path.parent.iterdir()), ["pushed_days.txt"])
+
+    def test_write_syncs_the_temporary_file_before_the_rename(self):
+        """The new list is flushed and fsynced to disk before it replaces the old file."""
+        order = []
+        real_fsync, real_replace = os.fsync, os.replace
+
+        def fsync(fd):
+            """Note the sync and check the temporary file already holds the new list."""
+            order.append("fsync")
+            self.assertEqual(self.path.with_name("pushed_days.txt.tmp").read_text(encoding="utf-8"), "2026-10-01\n")
+            real_fsync(fd)
+
+        def replace(src, dst):
+            """Note the rename."""
+            order.append("replace")
+            real_replace(src, dst)
+
+        with mock.patch("pusher.push_state.os.fsync", fsync), mock.patch("pusher.push_state.os.replace", replace):
+            self._state().record(DAYS[0], DAYS)
+        self.assertEqual(order, ["fsync", "replace"])
 
     def test_next_after_partial_and_full(self):
         self.assertEqual(self._state("2026-10-01\n").next_after(DAYS), DAYS[1])
