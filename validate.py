@@ -19,6 +19,8 @@ import pyarrow.parquet as pq
 
 results = []
 
+BINARY_SUFFIXES = {".parquet", ".avro"}
+
 
 def check(name, ok, detail=""):
     results.append(ok)
@@ -72,6 +74,81 @@ def parquet_rows(path):
         return None
 
 
+def day_before(resend):
+    """The original of a re-sent file: the same source, entity and name, without `_resend`, in the previous day's
+    folder (increments/day=D/braze/<entity>/name). Called by braze_checks."""
+    entity_dir = resend.parent
+    day_dir = entity_dir.parent.parent
+    previous = pd.Timestamp(day_dir.name[len("day="):]) - pd.Timedelta(days=1)
+    return (day_dir.parent / f"day={previous:%Y-%m-%d}" / entity_dir.parent.name / entity_dir.name
+            / resend.name.replace("_resend", ""))
+
+
+def fastavro_reader():
+    """A function that returns one Avro file's records, or None when fastavro is not installed.
+    Called by braze_checks when no reader is given."""
+    try:
+        import fastavro
+    except ImportError:
+        return None
+
+    def read(path):
+        with open(path, "rb") as handle:
+            return list(fastavro.reader(handle))
+    return read
+
+
+def braze_checks(stage, cnt, cut_off, read_records=None):
+    """The Braze files: exactly one _resend, its original a day earlier, smaller and recorded as cut off in the
+    manifest; when the files can be read, the cut-off file fails to read and duplicate event ids match the manifest.
+    `cut_off` holds the file names the manifest records as cut off; `read_records` returns one file's records.
+    Called by main unless the run skipped Braze."""
+    resends = files(stage, "**/braze/*/*_resend.avro")
+    originals = [day_before(p) for p in resends]
+    ok = (len(resends) == 1 and originals[0].exists() and originals[0].name in cut_off
+          and originals[0].stat().st_size < resends[0].stat().st_size)
+    check("one Braze file cut off and re-sent whole the next day", ok, ", ".join(p.name for p in resends))
+    read_records = read_records or fastavro_reader()
+    if read_records is None:
+        print("SKIP  Braze event checks: fastavro is not installed, so the Avro files cannot be read")
+        return
+    # The cut-off file's records arrive again in its re-send, so its ids are never counted
+    ids, cut_off_reads = [], False
+    for p in files(stage, "**/braze/*/*.avro"):
+        try:
+            records = read_records(p)
+        except Exception:
+            if p.name not in cut_off:
+                unreadable.append(p.name)
+            continue
+        if p.name in cut_off:
+            cut_off_reads = True
+            continue
+        ids.extend(r["id"] for r in records)
+    check("the cut-off Braze file does not read", not cut_off_reads, ", ".join(sorted(cut_off)))
+    dups = len(ids) - len(set(ids))
+    check("Braze duplicate event ids = manifest", dups == cnt("braze.duplicate_events"),
+          f"{dups} vs {cnt('braze.duplicate_events')}")
+
+
+def text_file_findings(stage):
+    """Return the names of text files that hold CRLF line endings and of those that start with a BOM.
+    Called by main for the line-ending checks."""
+    crlf, boms = [], []
+    for p in stage.rglob("*"):
+        # Skip folders and binary files
+        if not p.is_file() or p.suffix in BINARY_SUFFIXES:
+            continue
+
+        # Look for CRLF line endings and a BOM
+        data = read_gz(p) if p.suffix == ".gz" else p.read_bytes()
+        if b"\r\n" in data:
+            crlf.append(p.name)
+        if data.startswith(b"\xef\xbb\xbf"):
+            boms.append(p.name)
+    return crlf, boms
+
+
 def main(out):
     out = Path(out)
     stage = out / "landing_staging"
@@ -87,29 +164,29 @@ def main(out):
     check("manifest lists exactly the files on disk", on_disk == set(man["files"]),
           f"{len(on_disk)} on disk, {len(man['files'])} listed")
 
-    crlf, boms = [], []
-    for p in stage.rglob("*"):
-        if not p.is_file() or p.suffix == ".parquet":
-            continue
-        data = read_gz(p) if p.suffix == ".gz" else p.read_bytes()
-        if b"\r\n" in data:
-            crlf.append(p.name)
-        if data.startswith(b"\xef\xbb\xbf"):
-            boms.append(p.name)
+    crlf, boms = text_file_findings(stage)
     check("no CRLF line endings anywhere", not crlf, ", ".join(crlf[:3]))
     check("only the CRM full extract has a BOM", boms == ["customers_full_20260930.csv"], str(boms))
 
-    # web: truncated lines and duplicate event ids
-    bad, ids = 0, []
+    # web: truncated lines, duplicate event ids, and email sessions with no campaign tag
+    bad, ids, untagged = 0, [], set()
     for p in files(stage, "**/web/events/*.jsonl.gz"):
         for line in read_gz(p).decode("utf-8", errors="replace").splitlines():
             try:
-                ids.append(json.loads(line)["event_id"])
+                rec = json.loads(line)
             except json.JSONDecodeError:
                 bad += 1
+                continue
+            ids.append(rec["event_id"])
+            utm = rec.get("utm") or {}
+            if utm.get("source") == "newsletter" and utm.get("campaign") is None:
+                untagged.add(rec["session"]["id"])
     check("web truncated lines = manifest", bad == cnt("web.truncated_lines"), f"{bad} vs {cnt('web.truncated_lines')}")
     dups = len(ids) - len(set(ids))
     check("web duplicate event_ids = manifest", dups == cnt("web.duplicate_events"), f"{dups} vs {cnt('web.duplicate_events')}")
+    lost = cnt("web.utm_campaign_missing")
+    check("newsletter sessions without a campaign tag cover the manifest's count (other newsletter traffic has none)",
+          len(untagged) >= lost - bad, f"{len(untagged)} vs at least {lost}")
 
     # other JSON Lines parse cleanly
     broken = 0
@@ -144,7 +221,7 @@ def main(out):
     check("OMS exact duplicate history orders = manifest", d == cnt("oms.exact_duplicate_orders"),
           f"{d} vs {cnt('oms.exact_duplicate_orders')}")
     all_orders = pd.concat(read_parquet(p, columns=["order_id", "order_ts"]) for p in files(stage, "**/oms/orders/*.parquet"))
-    fut = all_orders.loc[all_orders["order_ts"] > pd.Timestamp("2026-11-01", tz="UTC"), "order_id"].nunique()
+    fut = all_orders.loc[all_orders["order_ts"] > pd.Timestamp("2027-01-01", tz="UTC"), "order_id"].nunique()
     check("OMS future-dated orders = manifest", fut == cnt("oms.future_dated_orders"), f"{fut} vs {cnt('oms.future_dated_orders')}")
     lines = pd.concat(read_parquet(p, columns=["order_id", "sku"]) for p in files(stage, "**/oms/order_lines/*.parquet"))
     orph = int((~lines["order_id"].isin(set(all_orders["order_id"]))).sum())
@@ -193,6 +270,22 @@ def main(out):
     mism = [k for k, v in man["files"].items() if v["kind"] == "parquet" and
             parquet_rows(stage / k) != v["rows"]]
     check("Parquet row counts match manifest", not mism, ", ".join(mism[:3]))
+
+    # ads: each agency reports in one currency, and both currencies appear
+    spend = [read_text(p) for p in files(stage, "**/ads/spend/*.csv")]
+    if spend:
+        rows = pd.read_csv(io.StringIO("".join(s if k == 0 else s.split("\n", 1)[1] for k, s in enumerate(spend))))
+        per_agency = rows.groupby("agency")["currency"].nunique()
+        check("each ad agency reports in one currency, CAD and USD both present",
+              per_agency.max() == 1 and set(rows["currency"]) == {"CAD", "USD"}, str(per_agency.to_dict()))
+
+    # Braze: one cut-off file, re-sent whole the next day; duplicate event ids when the files can be read
+    skipped = json.loads((out / "answer_key" / "run.json").read_text(encoding="utf-8")).get("skipped_sources", [])
+    if "braze" in skipped:
+        print("SKIP  Braze checks: the run left the braze source out")
+    else:
+        cut_off = set(D["braze.corrupt_file_resent"]["keys"]) if "braze.corrupt_file_resent" in D else set()
+        braze_checks(stage, cnt, cut_off)
 
     check("every file opens cleanly", not unreadable, ", ".join(sorted(set(unreadable))[:3]))
 

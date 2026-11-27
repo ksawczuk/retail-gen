@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from tests.generator_args import source_args
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -28,7 +29,7 @@ class ValidateTruncatedFileTest(unittest.TestCase):
             out = Path(tmp) / "out"
 
             # Generate a small dataset
-            gen = run("generate.py", "--scale", "0.01", "--out", str(out))
+            gen = run("generate.py", "--scale", "0.01", "--out", str(out), *source_args())
             self.assertEqual(gen.returncode, 0)
 
             # Cut one gzip file and one Parquet file short

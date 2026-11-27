@@ -17,6 +17,7 @@ from pathlib import Path
 
 import numpy as np
 
+from retailgen.avro import MissingDependency
 from retailgen.config import Config
 from retailgen.manifest import Manifest
 from retailgen.sources import EMITTERS
@@ -29,7 +30,9 @@ def write_truth(t, folder: Path):
     folder.mkdir(parents=True, exist_ok=True)
     for name in ["customers", "addresses", "customer_events", "address_events", "orders", "order_lines",
                  "payments", "shipments", "returns", "pos_lines", "products", "price_history",
-                 "categories", "suppliers", "promotions", "stores", "fx", "inventory", "clickstream"]:
+                 "categories", "suppliers", "promotions", "stores", "fx", "inventory", "clickstream",
+                 "campaigns", "campaign_assignment", "campaign_truth", "prospect_customers", "engagement_events",
+                 "consent_sync"]:
         df = getattr(t, name).copy()
         for c in df.columns:
             if df[c].dtype == object:
@@ -47,6 +50,8 @@ def main():
     ap.add_argument("--seed", type=int, default=Config.seed)
     ap.add_argument("--out", default="out")
     ap.add_argument("--no-truth", action="store_true")
+    ap.add_argument("--skip-source", action="append", default=[], choices=[name for name, _ in EMITTERS],
+                    help="leave one source out of the run (repeatable); recorded in answer_key/run.json")
     args = ap.parse_args()
 
     cfg = Config(scale=args.scale, seed=args.seed)
@@ -63,19 +68,25 @@ def main():
     man = Manifest()
     out = Output(root / "landing_staging", man)
     for name, emit in EMITTERS:
+        if name in args.skip_source:
+            log(f"source: {name} skipped")
+            continue
         log(f"source: {name}")
-        emit(cfg, rng, truth, out, man)
+        try:
+            emit(cfg, rng, truth, out, man)
+        except MissingDependency as exc:
+            raise SystemExit(f"stopped at source {name}: {exc}") from None
     man.write(root / "answer_key")
-    missing = man.unrecorded()
+    missing = man.unrecorded(args.skip_source)
     # Stop without run.json when a declared defect was never recorded; the ids go to the sealed folder, not the screen
     if missing:
         man.write_unrecorded(root / "answer_key")
-        raise SystemExit(man.incomplete_message(cfg.scale, cfg.seed))
+        raise SystemExit(man.incomplete_message(cfg.scale, cfg.seed, args.skip_source))
     if not args.no_truth:
         log("answer key: truth tables")
         write_truth(truth, root / "answer_key" / "truth")
     with open(root / "answer_key" / "run.json", "w", encoding="utf-8", newline="\n") as f:
-        json.dump({"scale": cfg.scale, "seed": cfg.seed}, f)
+        json.dump({"scale": cfg.scale, "seed": cfg.seed, "skipped_sources": sorted(args.skip_source)}, f)
     size = sum(p.stat().st_size for p in (root / "landing_staging").rglob("*") if p.is_file())
     log(f"done: {len(man.files)} files, {size / 1e6:.1f} MB in landing_staging")
 

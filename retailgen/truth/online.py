@@ -3,33 +3,46 @@ import numpy as np
 import pandas as pd
 
 from .. import reference as ref
-from ..util import seasonality, bounded_weighted_pick, seconds_in_day
+from ..util import seconds_in_day
 from .masterdata import price_lookup, fx_on
 from .customers import ship_to
+from .demand import Channel
+from .campaign_truth import HOLDOUT_REDEMPTION_SHARE, OUTSIDE_REDEMPTION_SHARE
 
 NS = "datetime64[ns]"
 ONLINE_HOURS = [1, .6, .4, .3, .3, .5, 1, 1.5, 2, 2.5, 3, 3, 3, 3, 3, 3.5, 4, 4.5, 5, 5.5, 5, 4, 3, 2]
+GUEST_SHARE = 0.12
+ONLINE_EXTRA_LINES = 1.2
+ONLINE_QTY_RATE = 0.28
+CODE_SHARE = 0.40
+
+
+def online_channel(cfg):
+    """The online channel: the configured orders per day, 12% of them guests."""
+    return Channel("online", cfg.web_orders_per_day, GUEST_SHARE)
 
 
 def _hours(rng, n, lo, hi):
     return pd.to_timedelta(rng.uniform(lo, hi, n), unit="h")
 
 
-def generate_online(cfg, rng, customers, addresses, products, price_history, promos, fx):
-    days = pd.date_range(cfg.history_start, cfg.increment_end, freq="D")
-    counts = rng.poisson(cfg.web_orders_per_day * seasonality(days))
-    n = int(counts.sum())
-    day = np.repeat(days.to_numpy().astype(NS), counts)
-    ts = np.sort(day + seconds_in_day(rng, n, ONLINE_HOURS).astype("timedelta64[s]")).astype(NS)
+def generate_online(cfg, rng, customers, addresses, price_history, promos, fx, days, purchases, baskets,
+                    code_audiences):
+    """Online orders with their lines, payments, shipments and returns. Who orders and when comes from the
+    demand engine's purchases; the lines from the basket builder. Called by build_truth after the draw."""
+    # Give each drawn order a time of day, in time order
+    day_idx, cust_idx, credit = purchases.day_index, purchases.customer_index, purchases.campaign
+    n = len(day_idx)
+    day = days.to_numpy().astype(NS)[day_idx]
+    ts = (day + seconds_in_day(rng, n, ONLINE_HOURS).astype("timedelta64[s]")).astype(NS)
+    order = np.argsort(ts, kind="stable")
+    ts, day_idx, cust_idx, credit = ts[order], day_idx[order], cust_idx[order], credit[order]
     orders = pd.DataFrame({"order_id": [f"ORD-{100000001 + i}" for i in range(n)], "order_ts": ts})
+    orders["campaign_credit"] = credit
 
-    # Who ordered: an existing customer weighted by activity, or a guest.
-    cust = customers.sort_values("created_at").reset_index(drop=True)
-    cumw = np.cumsum(cust["activity"].to_numpy())
-    ub = np.searchsorted(cust["created_at"].to_numpy(), ts, side="right")
-    guest = (rng.random(n) < 0.12) | (ub == 0)
-    ci = bounded_weighted_pick(rng, cumw, np.maximum(ub, 1))
-    orders["customer_id"] = np.where(guest, None, cust["customer_id"].to_numpy()[ci])
+    # Who ordered: the engine's customer, or a guest
+    guest = cust_idx < 0
+    orders["customer_id"] = np.where(guest, None, customers["customer_id"].to_numpy()[np.maximum(cust_idx, 0)])
     orders["guest_email"] = np.where(guest, [f"guest{rng.integers(10**6, 10**7)}@{ref.EMAIL_DOMAINS[rng.integers(5)]}"
                                              for _ in range(n)], None)
 
@@ -49,17 +62,12 @@ def generate_online(cfg, rng, customers, addresses, products, price_history, pro
     orders["currency"] = np.where(orders["ship_country"] == "US", "USD", "CAD")
     orders["channel"] = rng.choice(["web", "app"], size=n, p=[0.65, 0.35])
 
-    # Lines: popularity-weighted SKUs that had launched by the order time.
-    n_lines = 1 + rng.poisson(1.2, n)
-    oi = np.repeat(np.arange(n), n_lines)
-    prods = products[~products["pim_excluded"]].sort_values("launched_at").reset_index(drop=True)
-    pcum = np.cumsum(prods["popularity"].to_numpy())
-    pub = np.maximum(np.searchsorted(prods["launched_at"].to_numpy(), ts[oi], side="right"), 1)
-    lines = pd.DataFrame({"oi": oi, "sku": prods["sku"].to_numpy()[bounded_weighted_pick(rng, pcum, pub)]})
-    lines = lines.drop_duplicates(["oi", "sku"]).reset_index(drop=True)
+    # Lines: the customer's categories in season, SKUs launched by the order time
+    lines = baskets.lines(rng, ts, day_idx, cust_idx, extra_lines=ONLINE_EXTRA_LINES, qty_rate=ONLINE_QTY_RATE,
+                          qty_max=4, local_items=False, campaign=credit).rename(columns={"row": "oi"})
     lines["order_id"] = orders["order_id"].to_numpy()[lines["oi"]]
     lines["line_no"] = lines.groupby("oi").cumcount() + 1
-    lines["qty"] = rng.choice([1, 2, 3, 4], size=len(lines), p=[0.8, 0.14, 0.04, 0.02])
+    lines = lines[["oi", "sku", "order_id", "line_no", "qty"]]
     lts = ts[lines["oi"].to_numpy()]
     price_cad = price_lookup(price_history, lines["sku"].to_numpy(), lts)
     usd = (orders["currency"].to_numpy()[lines["oi"]] == "USD")
@@ -67,14 +75,19 @@ def generate_online(cfg, rng, customers, addresses, products, price_history, pro
     lines["unit_price"] = np.where(usd, np.round(price_cad / rate, 2), price_cad)
     lines["gross"] = np.round(lines["qty"] * lines["unit_price"], 2)
 
-    # Coupons: each promo is used by a share of orders placed while it runs.
+    # Coupons: a promo is used by a share of orders placed while it runs; a campaign's code by its audience
     coupon = np.full(n, None, dtype=object)
     web_promos = promos[promos["channels"].str.contains("web")]
+    buyer = orders["customer_id"].to_numpy()
     for p in web_promos.sample(frac=1, random_state=int(rng.integers(1 << 31))).itertuples(index=False):
         end = p.ends_at + pd.Timedelta(days=1) if pd.notna(p.ends_at) else cfg.increment_end + pd.Timedelta(days=1)
-        share = 0.03 if pd.isna(p.ends_at) else 0.25
-        hit = (ts >= p.starts_at.to_datetime64()) & (ts < end.to_datetime64()) & pd.isna(coupon) & (rng.random(n) < share)
-        coupon[hit] = p.code
+        open_ = (ts >= p.starts_at.to_datetime64()) & (ts < end.to_datetime64()) & pd.isna(coupon)
+        audience = code_audiences.get(p.code)
+        if audience is None:
+            share = 0.03 if pd.isna(p.ends_at) else 0.25
+            coupon[open_ & (rng.random(n) < share)] = p.code
+            continue
+        coupon[_code_redemptions(rng, open_, buyer, audience)] = p.code
     orders["coupon_code"] = coupon
     subtotal = lines.groupby("oi")["gross"].sum().reindex(range(n)).to_numpy()
     pinfo = promos.set_index("code")
@@ -128,6 +141,28 @@ def generate_online(cfg, rng, customers, addresses, products, price_history, pro
     lines = lines.drop(columns=["oi"])
     orders = orders.drop(columns=["tax_rate"])
     return orders, lines, payments, shipments, returns
+
+
+def _code_redemptions(rng, open_, buyer, audience):
+    """Orders that redeem a campaign's code: the treated use it; a leaking code also reaches the holdout and
+    customers outside the audience, as a set share of all redemptions."""
+    buyers = pd.Series(buyer)
+    treated = buyers.isin(audience.treated).to_numpy()
+    in_holdout = buyers.isin(audience.holdout).to_numpy()
+    hit = open_ & treated & (rng.random(len(buyer)) < CODE_SHARE)
+    if not audience.leaks:
+        return hit
+
+    # Leaks: add holdout and outside redemptions as their shares of the total
+    n_treated = int(hit.sum())
+    total = n_treated / (1 - HOLDOUT_REDEMPTION_SHARE - OUTSIDE_REDEMPTION_SHARE)
+    holdout = np.flatnonzero(open_ & in_holdout)
+    outside = np.flatnonzero(open_ & ~treated & ~in_holdout)
+    for pool, share in ((holdout, HOLDOUT_REDEMPTION_SHARE), (outside, OUTSIDE_REDEMPTION_SHARE)):
+        k = min(len(pool), int(round(total * share)))
+        if k:
+            hit[rng.choice(pool, size=k, replace=False)] = True
+    return hit
 
 
 def _payments(rng, orders):

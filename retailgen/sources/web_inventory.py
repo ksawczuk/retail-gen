@@ -34,6 +34,25 @@ def _bot_events(cfg, rng, start_day, n_sessions):
     return b
 
 
+def _tracked_campaigns(rng, ev, man):
+    """The utm campaign each event's session reports: some email sessions lose it, some arrive mangled.
+    Called by emit_web before the records are built."""
+    tags = ev["utm_campaign"].copy() if "utm_campaign" in ev else pd.Series(None, index=ev.index, dtype=object)
+    email = ev["utm_source"].eq("newsletter") & tags.notna()
+    sessions = ev.loc[email, "session_id"].unique()
+    draw = rng.random(len(sessions))
+
+    # A share of email sessions lose the tag, another share report it mangled
+    lost = set(sessions[draw < 0.08])
+    mangled = set(sessions[(draw >= 0.08) & (draw < 0.13)])
+    tags[ev["session_id"].isin(lost) & email] = None
+    bad = ev["session_id"].isin(mangled) & email
+    tags[bad] = [t.upper() if len(t) % 2 else t.replace("_", "-") for t in tags[bad]]
+    man.record("web.utm_campaign_missing", len(lost), keys=sorted(lost))
+    man.record("web.utm_campaign_variants", len(mangled), keys=sorted(mangled))
+    return tags
+
+
 def emit_web(cfg, rng, t, out, man):
     ev = t.clickstream.copy()
     ev["user_agent"] = [f"Mozilla/5.0 ({o}) {b}" for o, b in zip(ev["os"], ev["browser"])]
@@ -60,6 +79,7 @@ def emit_web(cfg, rng, t, out, man):
     ev = pd.concat([ev, d], ignore_index=True)
     consent_day = cfg.increment_day(15)
     man.record("web.schema_drift_consent", 1, day=consent_day)
+    ev["utm_campaign"] = _tracked_campaigns(rng, ev, man)
 
     def records(g):
         recs = []
@@ -79,6 +99,8 @@ def emit_web(cfg, rng, t, out, man):
                 rec["ecommerce"] = {"order_id": r.order_id}
             if not is_null(r.utm_source):
                 rec["utm"] = {"source": r.utm_source, "medium": r.utm_medium}
+                if not is_null(r.utm_campaign):
+                    rec["utm"]["campaign"] = r.utm_campaign
             if r.deliver_day >= consent_day:
                 rec["consent"] = {"analytics": True, "marketing": int(r.session_id[:2], 16) % 2 == 1}
             recs.append(rec)

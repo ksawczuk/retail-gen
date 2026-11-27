@@ -13,14 +13,20 @@ generate.py
   Config(scale, seed)                     retailgen/config.py
   build_truth(cfg, rng)                   retailgen/truth/__init__.py
     masterdata  FX, stores (+ events), catalogue, price history, promos
-    customers   people -> customer records (3% duplicates), addresses, CRM changes
-    online      orders, lines, payment events, shipments, returns
-    pos         baskets, in-store returns (incl. online orders returned in store)
+    customers   people -> customer records (3% duplicates), loyalty joins and tiers, addresses, CRM changes
+    signups     gain-loyalty emails and paid Prospects flights change joins and signups
+    build_demand  lifecycle (churn, fading, comebacks, basket size, category taste),
+                  seasonality (shared curve, gifting peaks, category curves),
+                  email campaigns (one DemandModifier per kind), DemandEngine.draw_all
+                  (both channels, day by day), BasketBuilder (lines)
+    online      orders drawn from the engine; lines, payment events, shipments, returns
+    pos         baskets drawn from the engine (true customer, card scan), in-store returns
     web         sessions/events tied to real online orders + browse-only traffic
     inventory   weekly stock model per store x tracked SKU
+    campaigns   answer key: designs, audiences, what each campaign truly did; email events
     check_truth referential + arithmetic assertions
   EMITTERS                                retailgen/sources/__init__.py
-    crm, pim, storeops, finance, promo, oms, pos, web, inventory
+    crm, pim, storeops, finance, promo, oms, pos, web, inventory, ads, braze
       -> Output (retailgen/writers.py): CSV / JSONL / JSON / Parquet, LF endings
       -> Manifest (retailgen/manifest.py): defect id, count, example keys
            metadata looked up in the catalogue (retailgen/defects.py)
@@ -52,9 +58,32 @@ validate.py                               re-reads the files; does not import re
   recording an undeclared id fails, a wrong set of `detail` names fails, and `generate.py`
   fails at the end if a declared defect was never recorded. The catalogue is a spoiler,
   just like `answer_key/`.
-- **`bounded_weighted_pick`** (`util.py`) picks, for each order, a customer or SKU that
-  already existed at that time, weighted by activity or popularity, in one vectorised
-  step. It uses cumulative weights plus `searchsorted`.
+- **`bounded_weighted_pick`** (`util.py`) picks, for each line, a SKU that had launched by
+  then, weighted by popularity, in one vectorised step. It uses cumulative weights plus
+  `searchsorted`.
+- **One demand engine.** `truth/demand.py` decides who buys on which day, online and in
+  store, from one model. A customer's daily weight is their activity times their lifecycle
+  level (`truth/lifecycle.py`: churn, fading, comebacks); the day's expected total is the
+  channel's base rate times the seasonality (`truth/seasonality.py`). Customers are drawn
+  in proportion to their weights, so recency and frequency carry real signal. The engine
+  draws both channels day by day, so a campaign on a day sees what was bought before it.
+- **Campaigns.** Each email campaign kind is a `DemandModifier` (`truth/campaigns.py`): on
+  its send days it picks an audience (and a holdout, for some) and emails it; on later days
+  it gives each treated customer a relative lift. The engine combines the lifts (the
+  largest in full, others damped), raises the day's total accordingly, and marks a
+  purchase above a customer's baseline as caused by the campaign. Gain-loyalty emails and
+  paid flights act before the engine, on join dates and signups (`truth/signups.py`).
+  A purchase a campaign caused leans to the campaign's promoted categories when its lines
+  are picked. The answer key's `campaign_truth.parquet` holds what each campaign truly
+  did, counted from those marks, with each campaign's nominal and realized lift.
+- **What the store sees.** Every store basket has a true customer
+  (`true_customer_id` in the truth). The POS shows `customer_id` only when a loyalty
+  member who had already joined scans their card, about 40% of baskets.
+- **Baskets.** `truth/baskets.py` picks each line's category from the customer's taste
+  (a Dirichlet draw; the top three categories hold about two-thirds of a customer's
+  taste) times that month's category season, then a SKU in that category launched by
+  then. A customer's basket multiplier scales both the number of lines and the
+  quantities.
 
 ## Changing things
 

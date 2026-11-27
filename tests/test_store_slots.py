@@ -22,6 +22,16 @@ def raw_draw(cfg):
     return list(rng.choice(len(ref.CITIES), size=cfg.n_stores, p=w / w.sum()))
 
 
+def guarded_seed():
+    """The first seed whose raw draw at scale 0.01 has no US store and its only QC store at slot 1 (Bug 677)."""
+    for seed in range(1, 1000):
+        draw = raw_draw(Config(scale=0.01, seed=seed))
+        no_us = not any(ref.CITIES[i][2] == "US" for i in draw)
+        if no_us and [k for k, i in enumerate(draw) if ref.CITIES[i][1] == "QC"] == [1]:
+            return seed
+    raise AssertionError("no seed below 1000 gives the guarded case")
+
+
 class UsSlotTest(unittest.TestCase):
     """The helper picks the first slot from 1 up that does not hold the only QC store."""
 
@@ -50,17 +60,17 @@ class GenerateStoresTest(unittest.TestCase):
         generate_fx(cfg, rng)
         return cfg, generate_stores(cfg, rng)
 
-    def test_seed_13_completes_with_a_qc_and_a_us_store(self):
-        """The seed that used to raise now returns stores and a recode event for a QC store."""
-        cfg, (stores, events) = self.stores_for(13)
+    def test_the_guarded_seed_completes_with_a_qc_and_a_us_store(self):
+        """The case that used to raise now returns stores and a recode event for a QC store."""
+        cfg, (stores, events) = self.stores_for(guarded_seed())
         self.assertEqual(len(stores), cfg.n_stores)
         self.assertIn("QC", set(stores["province"]))
         self.assertIn("US", set(stores["country"]))
         self.assertTrue(events)
 
-    def test_seed_13_changes_only_the_guarded_slot_of_the_raw_draw(self):
+    def test_the_guarded_seed_changes_only_the_guarded_slot_of_the_raw_draw(self):
         """The store count equals the draw's, and exactly one raw city is swapped for the US city."""
-        cfg, (stores, _) = self.stores_for(13)
+        cfg, (stores, _) = self.stores_for(guarded_seed())
         raw = Counter(ref.CITIES[i][0] for i in raw_draw(cfg))
         now = Counter(stores["city"])
         self.assertEqual(sum(now.values()), sum(raw.values()))

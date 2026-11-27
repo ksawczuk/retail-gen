@@ -96,6 +96,8 @@ _DEFECTS = [
            "D events for keys that were never inserted"),
     Defect("crm.cdc_multiple_changes_same_batch", "crm", "customers_cdc", "cdc",
            "the same key changes more than once in one daily file", systemic=True),
+    Defect("crm.consent_sync_lag", "crm", "customers", "semantics",
+           "email unsubscribes that reach the CRM opt-in a day or more later, or never"),
     Defect("crm.cdc_schema_drift_loyalty_tier", "crm", "customers_cdc", "schema_drift",
            "LOYALTY_TIER column appears from 2026-10-10 onward", systemic=True),
 
@@ -244,6 +246,42 @@ _DEFECTS = [
            "nested 'consent' object appears from {day:%Y-%m-%d}", systemic=True),
     Defect("web.truncated_lines", "web", "events", "file",
            "truncated JSON lines (cut off mid-record) spliced into files"),
+    Defect("web.utm_campaign_missing", "web", "events", "completeness",
+           "sessions that came from an email click but carry no utm campaign"),
+    Defect("web.utm_campaign_variants", "web", "events", "format",
+           "utm campaign tags in the wrong case or with hyphens instead of underscores"),
+
+    # ---------------- Ad agencies
+    Defect("ads.usd_agency", "ads", "spend", "format",
+           "{agency} reports spend in US dollars; the other agency in Canadian dollars", systemic=True),
+    Defect("ads.missing_days", "ads", "spend", "completeness",
+           "agency spend rows for some flight days never arrive"),
+
+    # ---------------- Braze (email platform)
+    Defect("braze.machine_opens", "braze", "opens", "semantics",
+           "opens include mail clients' automatic opens; the machine_open flag exists only from {day}", systemic=True),
+    Defect("braze.schema_drift", "braze", "events", "schema_drift",
+           "opens gain machine_open on {opens}, clicks gain link_alias on {clicks}, sends rename send_id to "
+           "dispatch_id on {sends}", systemic=True),
+    Defect("braze.late_events", "braze", "events", "late_arriving", "events delivered 1 to 5 days after they happened"),
+    Defect("braze.duplicate_events", "braze", "events", "duplicate", "the same event id delivered twice"),
+    Defect("braze.anonymous_users", "braze", "users", "identity",
+           "profiles anonymous at first (no external_id); most identified later, some never"),
+    Defect("braze.external_id_formats", "braze", "users", "identity",
+           "external_id is a lower-case email or a legacy id instead of the customer id"),
+    Defect("braze.one_profile_two_customers", "braze", "users", "identity",
+           "a person with two CRM records has one Braze profile, carrying one of the two ids"),
+    Defect("braze.sends_without_consent", "braze", "sends", "business_rule",
+           "emails sent to customers who never opted in"),
+    Defect("braze.sends_after_unsubscribe", "braze", "sends", "business_rule",
+           "emails sent to customers after they unsubscribed"),
+    Defect("braze.campaign_renamed", "braze", "campaigns", "scd", "campaigns renamed after launch"),
+    Defect("braze.campaign_id_reused", "braze", "campaigns", "identity",
+           "a later campaign cloned from an older one keeps its campaign id"),
+    Defect("braze.campaign_name_convention", "braze", "campaigns", "format",
+           "campaign names that break the snake-case naming convention"),
+    Defect("braze.corrupt_file_resent", "braze", "opens", "file",
+           "an events file arrives cut off and unreadable; the same records come the next day as a _resend file"),
 
     # ---------------- Inventory
     Defect("inventory.negative_on_hand", "inventory", "snapshots", "business_rule", "negative on_hand quantities"),

@@ -3,11 +3,15 @@ import numpy as np
 import pandas as pd
 
 from .. import reference as ref
-from ..util import seasonality, bounded_weighted_pick, seconds_in_day
+from ..util import seconds_in_day
 from .masterdata import price_lookup, fx_on, store_open_matrix
+from .demand import Channel
 
 NS = "datetime64[ns]"
 STORE_HOURS = [0] * 9 + [2, 3, 4, 5, 5, 5, 5, 5, 5, 4, 3, 2, 0, 0, 0]
+SCAN_RATE = 0.73
+STORE_EXTRA_LINES = 0.7
+STORE_QTY_RATE = 0.18
 
 
 def _local_to_utc(local: pd.Series, tz: pd.Series) -> np.ndarray:
@@ -19,51 +23,62 @@ def _local_to_utc(local: pd.Series, tz: pd.Series) -> np.ndarray:
     return out
 
 
-def generate_pos(cfg, rng, stores, store_events, customers, products, price_history, promos, fx,
-                 online_orders, online_lines, online_returns):
-    days = pd.date_range(cfg.history_start, cfg.increment_end, freq="D")
+def store_channel(cfg):
+    """The store channel: the configured transactions per day; every one has a true customer."""
+    return Channel("store", cfg.pos_txns_per_day, 0.0)
+
+
+def generate_pos(cfg, rng, stores, store_events, customers, price_history, promos, fx,
+                 online_orders, online_lines, online_returns, days, purchases, baskets):
+    """Store sales and returns, one row per line. Who buys and when comes from the demand engine's purchases; the
+    customer shows in the data only when a member's card is scanned. Called by build_truth after online."""
+    # Take the drawn transactions
     open_m = store_open_matrix(stores, store_events, days)
-    counts = rng.poisson(cfg.pos_txns_per_day * seasonality(days))
+    day_idx, cust_idx, credit = purchases.day_index, purchases.customer_index, purchases.campaign
+
+    # Send each transaction to a store open that day, by floor area; days with no open store sell nothing
     sqft = stores["sqft"].to_numpy(float)
-    day_l, store_l = [], []
-    for d, c in enumerate(counts):
+    sidx = np.full(len(day_idx), -1)
+    for d in np.unique(day_idx):
+        rows = np.flatnonzero(day_idx == d)
         w = sqft * open_m[d]
-        if c == 0 or w.sum() == 0:
-            continue
-        day_l.append(np.repeat(days[d].to_datetime64(), c))
-        store_l.append(rng.choice(len(stores), size=c, p=w / w.sum()))
-    tday = np.concatenate(day_l).astype(NS)
-    sidx = np.concatenate(store_l)
-    n = len(tday)
+        if w.sum() > 0:
+            sidx[rows] = rng.choice(len(stores), size=len(rows), p=w / w.sum())
+    keep = sidx >= 0
+    day_idx, cust_idx, sidx, credit = day_idx[keep], cust_idx[keep], sidx[keep], credit[keep]
+    n = len(day_idx)
+    tday = days.to_numpy().astype(NS)[day_idx]
     txn = pd.DataFrame({"store_id": stores["store_id"].to_numpy()[sidx],
                         "local_ts": tday + seconds_in_day(rng, n, STORE_HOURS).astype("timedelta64[s]"),
                         "register": rng.integers(1, 7, n),
                         "tender_type": rng.choice(["debit", "credit", "cash", "gift_card"], size=n, p=[.4, .45, .1, .05])})
     txn["cashier_id"] = [f"E{s}{k:02d}" for s, k in zip(txn["store_id"], rng.integers(1, 13, n))]
+    txn["campaign_credit"] = credit
 
-    # Loyalty scans: a member who had signed up by then; a few are staff buying with discount.
-    members = customers[customers["loyalty_number"].notna()].sort_values("created_at").reset_index(drop=True)
-    staff = members[members["is_employee"]]
-    cumw = np.cumsum(members["activity"].to_numpy())
-    ub = np.searchsorted(members["created_at"].to_numpy(), txn["local_ts"].to_numpy(), side="right")
-    scan = (rng.random(n) < 0.40) & (ub > 0)
-    pick = bounded_weighted_pick(rng, cumw, np.maximum(ub, 1))
-    txn["customer_id"] = np.where(scan, members["customer_id"].to_numpy()[pick], None)
-    emp = (rng.random(n) < 0.01) & (len(staff) > 0)
+    # A few transactions are staff buying with their discount, always scanned: staff signed up before that day
+    staff = np.flatnonzero(customers["is_employee"].to_numpy())
+    hired = np.searchsorted(customers["created_at"].to_numpy().astype(NS)[staff], tday, side="left")
+    emp = (rng.random(n) < 0.01) & (hired > 0)
     if emp.any():
-        txn.loc[emp, "customer_id"] = staff["customer_id"].to_numpy()[rng.integers(0, len(staff), int(emp.sum()))]
+        cust_idx = cust_idx.copy()
+        cust_idx[emp] = staff[(rng.random(int(emp.sum())) * hired[emp]).astype(int)]
+        txn.loc[emp, "campaign_credit"] = None
     txn["employee_sale"] = emp
 
-    # Lines.
-    n_lines = 1 + rng.poisson(0.7, n)
-    ti = np.repeat(np.arange(n), n_lines)
-    prods = products.sort_values("launched_at").reset_index(drop=True)
-    pcum = np.cumsum(prods["popularity"].to_numpy())
-    lts = txn["local_ts"].to_numpy()[ti]
-    pub = np.maximum(np.searchsorted(prods["launched_at"].to_numpy(), lts, side="right"), 1)
-    lines = pd.DataFrame({"ti": ti, "sku": prods["sku"].to_numpy()[bounded_weighted_pick(rng, pcum, pub)]})
-    lines = lines.drop_duplicates(["ti", "sku"]).reset_index(drop=True)
-    lines["qty"] = rng.choice([1, 2, 3], size=len(lines), p=[.85, .12, .03])
+    # The true customer, and the card scan that shows them: only members who had joined by then
+    ids = customers["customer_id"].to_numpy()
+    joined = customers["loyalty_join_at"].to_numpy().astype(NS)
+    known = cust_idx >= 0
+    true_id = np.where(known, ids[np.maximum(cust_idx, 0)], None)
+    member = known & (joined[np.maximum(cust_idx, 0)] <= txn["local_ts"].to_numpy())
+    scan = (member & (rng.random(n) < SCAN_RATE)) | emp
+    txn["true_customer_id"] = true_id
+    txn["customer_id"] = np.where(scan, true_id, None)
+
+    # Lines: the customer's categories in season, SKUs launched by then, sometimes a store-local item
+    lines = baskets.lines(rng, txn["local_ts"].to_numpy(), day_idx, cust_idx, extra_lines=STORE_EXTRA_LINES,
+                          qty_rate=STORE_QTY_RATE, qty_max=3, local_items=True,
+                          campaign=txn["campaign_credit"].to_numpy()).rename(columns={"row": "ti"})
     lines = lines.merge(txn, left_on="ti", right_index=True)
     lines = _price_lines(cfg, rng, lines, stores, price_history, promos, fx)
     lines["orig_txn_ref"] = None
@@ -154,6 +169,7 @@ def _returns(cfg, rng, sales, stores, store_events, online_orders, online_lines,
         "line_discount": -np.round(orr["orig_disc"].to_numpy() / orr["orig_qty"].to_numpy() * orr["qty"].to_numpy(), 2),
         "currency": orr["order_id"].map(o["currency"]).to_numpy(),
         "customer_id": orr["order_id"].map(o["customer_id"]).to_numpy(),
+        "true_customer_id": orr["order_id"].map(o["customer_id"]).to_numpy(),
         "promo_code": None, "orig_order_ref": orr["order_id"].to_numpy(), "orig_basket": np.nan,
     })
     r = pd.concat([sp, oc], ignore_index=True)
@@ -174,7 +190,9 @@ def _returns(cfg, rng, sales, stores, store_events, online_orders, online_lines,
     r["is_return"] = True
     r["orig_txn_ref"] = None
     r["basket_src"] = -1
-    keep = ["store_id", "local_ts", "register", "tender_type", "cashier_id", "customer_id", "employee_sale",
+    r["campaign_credit"] = None
+    keep = ["store_id", "local_ts", "register", "tender_type", "cashier_id", "customer_id", "true_customer_id",
+            "campaign_credit", "employee_sale",
             "sku", "qty", "currency", "province", "unit_price", "promo_code", "line_discount", "line_tax",
             "orig_txn_ref", "orig_order_ref", "is_return", "basket_src", "orig_basket"]
     return r[keep]

@@ -10,6 +10,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from .avro import default_writer
+
 
 def to_jsonable(v):
     """Convert numpy/pandas scalars to plain JSON values; NaN/NaT become null."""
@@ -47,9 +49,10 @@ def floor_timestamps(df):
 class Output:
     """Writes history and increment files under one root and logs each to the manifest."""
 
-    def __init__(self, root: Path, manifest):
+    def __init__(self, root: Path, manifest, avro_writer=None):
         self.root = Path(root)
         self.manifest = manifest
+        self._avro = avro_writer if avro_writer is not None else default_writer()
 
     def rel(self, day, source, entity, filename) -> str:
         if day is None:
@@ -111,6 +114,17 @@ class Output:
         # Floor timestamps to microseconds, then write with the strict microsecond unit (GEN-01)
         floor_timestamps(df).to_parquet(self._path(rel), index=False, engine="pyarrow", coerce_timestamps="us")
         self.manifest.note_file(rel, len(df), "parquet")
+        return rel
+
+    def avro(self, records, schema, day, source, entity, filename, keep_share=None):
+        """Write one deflate-compressed Avro file. `keep_share` keeps only that share of the bytes, for a file that
+        arrives cut off. Called by the Braze emitter."""
+        rel = self.rel(day, source, entity, filename)
+        data = self._avro.to_bytes(schema, records)
+        if keep_share is not None:
+            data = data[:int(len(data) * keep_share)]
+        self._path(rel).write_bytes(data)
+        self.manifest.note_file(rel, len(records), "avro")
         return rel
 
     def empty(self, day, source, entity, filename):

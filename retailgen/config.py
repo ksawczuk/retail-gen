@@ -12,7 +12,7 @@ class Config:
     seed: int = 20261110
     history_start: pd.Timestamp = pd.Timestamp("2025-01-01")
     history_end: pd.Timestamp = pd.Timestamp("2026-09-30")
-    increment_end: pd.Timestamp = pd.Timestamp("2026-10-30")
+    increment_end: pd.Timestamp = pd.Timestamp("2026-12-31")
     clickstream_start: pd.Timestamp = pd.Timestamp("2026-01-01")
 
     base_customers: int = 60_000

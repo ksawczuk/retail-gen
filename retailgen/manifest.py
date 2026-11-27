@@ -38,13 +38,15 @@ class Manifest:
     def count(self, defect_id) -> int:
         return self._entries[defect_id]["count"] if defect_id in self._entries else 0
 
-    def unrecorded(self) -> list:
-        """Catalogued defects no emitter recorded: the catalogue and the code have drifted apart."""
-        return [i for i in self._registry if i not in self._entries]
+    def unrecorded(self, skipped_sources=()) -> list:
+        """Catalogued defects no emitter recorded: the catalogue and the code have drifted apart. Defects of a
+        source the run skipped on purpose are not counted."""
+        skipped = set(skipped_sources)
+        return [i for i in self._registry if i not in self._entries and self._registry[i].source not in skipped]
 
-    def incomplete_message(self, scale, seed):
+    def incomplete_message(self, scale, seed, skipped_sources=()):
         """One line for a run that left declared defects unrecorded: scale, seed and counts, no defect ids."""
-        missing, declared = len(self.unrecorded()), len(self._registry)
+        missing, declared = len(self.unrecorded(skipped_sources)), len(self._registry)
         return (f"scale {scale}, seed {seed}: the run recorded {declared - missing} of {declared} declared "
                 "defects, so its output is not complete and must be regenerated. Small scales cannot always "
                 "record all of them: use a larger scale or another seed. The ids are in "

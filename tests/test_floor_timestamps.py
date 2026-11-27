@@ -11,6 +11,7 @@ import pandas as pd
 
 import generate
 from retailgen.writers import Output, floor_timestamps
+from tests.generator_args import source_args
 
 # What identifies a row of each Parquet entity, for the tie check
 KEYS = {
@@ -58,7 +59,7 @@ class NoNewTiesTest(unittest.TestCase):
             return original(self, df, day, source, entity, filename)
 
         with tempfile.TemporaryDirectory() as tmp:
-            argv = ["generate.py", "--scale", "0.01", "--out", str(Path(tmp)), "--no-truth"]
+            argv = ["generate.py", "--scale", "0.01", "--out", str(Path(tmp)), "--no-truth", *source_args()]
             with mock.patch("sys.argv", argv), mock.patch.object(Output, "parquet", spy):
                 generate.main()
 

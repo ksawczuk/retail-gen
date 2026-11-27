@@ -6,16 +6,17 @@ documented by people who were slightly wrong. This repo generates that kind of d
 known level of dirtiness, for working through a Databricks medallion build: ingestion →
 bronze → cleansing → silver → gold.
 
-The company is *Larchwood Supply Co.*, a fictional Canadian retailer with nine source systems:
-CRM, PIM, store ops, e-commerce OMS, POS, promotions, web analytics, inventory and FX. There
-are ~21 months of history (2025-01-01 → 2026-09-30), then 30 daily increments
-(2026-10-01 → 2026-10-30) that you release one day at a time, so your ingestion sees files
+The company is *Larchwood Supply Co.*, a fictional Canadian retailer with eleven source systems:
+CRM, PIM, store ops, e-commerce OMS, POS, promotions, web analytics, inventory, FX, the Braze
+email platform and the ad agencies' spend reports. There
+are ~21 months of history (2025-01-01 → 2026-09-30), then 92 daily increments
+(2026-10-01 → 2026-12-31) that you release one day at a time, so your ingestion sees files
 arrive the way it would in production.
 
 ### How it is built
 
 ```
-seed ─▶ clean "truth" world ─▶ check_truth() ─▶ 9 source emulators ─▶ landing files
+seed ─▶ clean "truth" world ─▶ check_truth() ─▶ 11 source emulators ─▶ landing files
           (what really              (proves it's        (each adds its own     │
            happened)                 consistent)         defects, and logs     │
                                                          every one)            ▼
@@ -54,9 +55,15 @@ to Databricks. The data works for any platform's tutorial.
 | raw size | ~300 MB |
 | run time | ~10–15 min |
 
+The counts, size and run time above were measured on the 30-day window. The window now runs to 2026-12-31
+(92 increment days); the full-scale figures for it are not measured yet. At `--scale 0.1` the 92-day run
+takes about 3.5 minutes and writes about 42 MB.
+
 ## Generate
 
-Needs Python 3 with numpy, pandas and pyarrow (built with numpy 2.4, pandas 3.0, pyarrow 23):
+Needs Python 3 with numpy, pandas and pyarrow (built with numpy 2.4, pandas 3.0, pyarrow 23), and
+`fastavro==1.10.0` for the Braze files (without it, the run stops at the Braze source with a
+one-line message; `--skip-source braze` leaves that source out):
 
 ```bash
 python generate.py
@@ -112,7 +119,8 @@ data is kept. The dataset is sized so a full rerun is cheap.
 - `answer_key/` holds everything that was done to the data. Use `defects.md` to score
   your bronze/silver findings, and `truth/` to check silver/gold numbers against what
   really happened. Customer `person_id` in `truth/customers.parquet` is the identity
-  resolution answer.
+  resolution answer. The `campaign*`, `prospect_customers` and `engagement_events` tables
+  hold the marketing truth: each campaign's audience, holdout and true effect.
 - Possible gold marts, as starting points only: daily sales by channel/store, customer
   360/RFM, product and category performance, returns and refunds, web funnel conversion,
   inventory cover.
