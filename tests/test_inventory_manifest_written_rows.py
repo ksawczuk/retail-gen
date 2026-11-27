@@ -13,7 +13,7 @@ from retailgen.sources.web_inventory import emit_inventory
 
 HISTORY_WEEKS = list(pd.date_range(end="2026-09-27", periods=8, freq="W-SUN"))
 IN_WINDOW_WEEK = pd.Timestamp("2026-10-25")
-AFTER_WINDOW_WEEK = pd.Timestamp("2026-11-01")
+AFTER_WINDOW_WEEK = pd.Timestamp("2027-01-03")
 
 
 class FakeOutput:
