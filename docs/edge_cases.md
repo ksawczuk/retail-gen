@@ -112,6 +112,12 @@ Scenarios the generator handles on purpose, and why. One entry per case; code co
 - **GEN-23 The line-ending scan skips binary files.** `validate.py` looks for CRLF endings and a BOM in text files
   only. Parquet and Avro files are skipped, because compressed binary bytes can hold the pair CR LF by chance, which
   is not a line ending. The suffixes are in `BINARY_SUFFIXES`; the test is `tests/test_validate_line_endings.py`.
+- **GEN-24 New customers in one batch get unique logins (Bug 818).** `add_customers()` checked each new login only
+  against the existing customers, so two signups from the same ad flight could draw the same address. Each login is now
+  checked against the existing customers and against the logins already given out earlier in the batch, and a number is
+  added before the @ until it is free. The tests are `tests/test_add_customers_unique_logins.py` (3 cases). At scale 0.1
+  with `--skip-source braze`, the output is byte-identical to the previous commit (1793 files, SHA-256 of every file
+  compared); the full-scale check is Learning 787 after this merge.
 
 ## Pusher
 

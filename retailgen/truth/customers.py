@@ -95,10 +95,18 @@ def add_customers(cfg, rng, customers, addresses, created_at):
     start = int(customers["customer_id"].str[1:].astype(int).max()) + 1
     people.insert(0, "customer_id", [f"C{start + i}" for i in range(len(people))])
 
-    # Keep logins unique against the existing customers
+    # Keep logins unique against the existing customers and the rest of the batch
     taken = set(customers["email"])
-    people["email"] = [e if e not in taken else e.replace("@", f"{k + 1}@", 1)
-                       for k, e in enumerate(people["email"])]
+    unique_logins = []
+    for email in people["email"]:
+        # Try the login as drawn, then with a number before the @, until no customer or earlier signup has it
+        login, k = email, 0
+        while login in taken:
+            k += 1
+            login = email.replace("@", f"{k}@", 1)
+        taken.add(login)
+        unique_logins.append(login)
+    people["email"] = unique_logins
 
     # Same attributes and addresses as any signup; loyalty numbers never reused
     new = _customer_attributes(cfg, rng, people, taken_numbers=set(customers["loyalty_number"].dropna()))
